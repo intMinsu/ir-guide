@@ -1,6 +1,6 @@
 # Intelligent Robot Guide Documentation <br>
 Author : Minsu Kwon (M.S in Dept of AI, University of Seoul)<br><br>
-![Banner image](assets/nvidia-jetson-developer-kit-series.png) 
+![Banner image](assets/logo.jpg) 
 <br> 
 
 ## 📍 Preclaimer
@@ -16,8 +16,9 @@ This documentation expects users to have such environment:<br>
 * cuDNN 8.6.0.166
 * Pytorch 2.1.0
 * Torchvision 0.16.1
-* OpenCV 4.6.0 with CUDA
+* OpenCV 4.10.0 with CUDA
 * Jetson-inference
+<br>
 
 ## 🚀 Table of Contents
 |-| Name | Description | Link |
