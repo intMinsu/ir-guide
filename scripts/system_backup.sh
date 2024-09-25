@@ -25,7 +25,7 @@ SOURCE_DIRECTORIES="/ /boot /home"
 EXCLUDES="--exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/mnt --exclude=/media --exclude=/tmp --exclude=/swapfile"
 
 echo "Starting system backup from $SOURCE_DIRECTORIES to $BACKUP_FILE..."
-tar czp --one-file-system $EXCLUDES -f $BACKUP_FILE $SOURCE_DIRECTORIES
+tar cvf - --one-file-system $EXCLUDES $SOURCE_DIRECTORIES | pigz -p N -c > $BACKUP_FILE
 
 # Check if tar was successful
 if [ $? -eq 0 ]; then
