@@ -2,7 +2,7 @@
 # https://qengineering.eu/install-opencv-on-jetson-nano.html
 
 version="4.10.0"
-FILE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FILE_DIR=$(cd $(dirname $BASH_SOURCE) && pwd)
 folder="${FILE_DIR}/../opencv-workspace"
 echo "opencv-${version} and opencv_contrib-${version} will be downloaded onto ${folder}."
 echo ""

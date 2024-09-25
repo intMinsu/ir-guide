@@ -7,8 +7,24 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Set source (the backup file) and destination (the system disk)
-BACKUP_FILE="/home/$(whoami)/system_backup_$(whoami).img"  # Path to the backup image
 DEST_DISK="/dev/nvme0n1p1"      # Change this to the disk you want to restore to (ensure it's the correct disk)
+
+FILE_DIR=$(cd $(dirname $BASH_SOURCE) && pwd)
+
+# Extract the home folder and onwards if the path is under /home
+if [[ $FILE_DIR == /home/* ]]; then
+    # Extract only the username from the path
+    USERNAME=$(echo "$FILE_DIR" | sed -e 's|/home/\([^/]*\).*|\1|')
+    echo "Username: $USERNAME"
+else
+    echo "Executable is not in the /home directory."
+    exit 1
+fi
+
+GZ_BACKUP_FILE = "${FILE_DIR}/../system_backup_${USERNAME}.img.gz"
+gzip -c -d "$GZ_BACKUP_FILE" > "$BACKUP_FILE"
+
+BACKUP_FILE="${FILE_DIR}/../system_backup_${USERNAME}.img"  # Specify the path where you want to save the backup
 
 echo "Starting system recovery from $BACKUP_FILE to $DEST_DISK..."
 
