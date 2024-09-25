@@ -6,8 +6,6 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Set source (your system disk, e.g., /dev/sda) and destination (backup file)
-SOURCE_DISK="/dev/nvme0n1p1"      # Change this to your system disk
 FILE_DIR=$(cd $(dirname $BASH_SOURCE) && pwd)
 
 # Extract the home folder and onwards if the path is under /home
@@ -20,31 +18,18 @@ else
     exit 1
 fi
 
-BACKUP_FILE="${FILE_DIR}/../system_backup_${USERNAME}.img"  # Specify the path where you want to save the backup
+BACKUP_FILE="${FILE_DIR}/../system_backup_${USERNAME}.tar.gz"
+SOURCE_DIRECTORIES="/ /boot /home"
 
-echo "Starting system backup from $SOURCE_DISK to $BACKUP_FILE..."
+# Exclude files that shouldn't be backed up (e.g., /proc, /sys, /dev)
+EXCLUDES="--exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/mnt --exclude=/media --exclude=/tmp --exclude=/swapfile"
 
-# Perform the backup using dd
-dd if=$SOURCE_DISK of=$BACKUP_FILE bs=64K status=progress conv=noerror,sync
+echo "Starting system backup from $SOURCE_DIRECTORIES to $BACKUP_FILE..."
+tar czp --one-file-system $EXCLUDES -f $BACKUP_FILE $SOURCE_DIRECTORIES
 
-# # Check if dd was successful
+# Check if tar was successful
 if [ $? -eq 0 ]; then
-    echo "Backup completed successfully."
+  echo "Backup completed successfully. Archive saved to $BACKUP_FILE."
 else
-    echo "Backup failed."
-fi
-
-COMPRESSED_FILE="${BACKUP_FILE}.gz"
-
-# Compress the image file using gzip (lossless)
-echo "Compressing $BACKUP_FILE to $COMPRESSED_FILE..."
-
-gzip -c "$BACKUP_FILE" > "$COMPRESSED_FILE"
-
-# Check if gzip succeeded
-if [ $? -eq 0 ]; then
-    echo "Compression completed successfully: $COMPRESSED_FILE"
-else
-    echo "Compression failed."
-    exit 1
+  echo "Backup failed."
 fi

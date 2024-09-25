@@ -6,9 +6,6 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Set source (the backup file) and destination (the system disk)
-DEST_DISK="/dev/nvme0n1p1"      # Change this to the disk you want to restore to (ensure it's the correct disk)
-
 FILE_DIR=$(cd $(dirname $BASH_SOURCE) && pwd)
 
 # Extract the home folder and onwards if the path is under /home
@@ -21,19 +18,15 @@ else
     exit 1
 fi
 
-GZ_BACKUP_FILE = "${FILE_DIR}/../system_backup_${USERNAME}.img.gz"
-gzip -c -d "$GZ_BACKUP_FILE" > "$BACKUP_FILE"
+RESTORE_DESTINATION="/"
+BACKUP_FILE="${FILE_DIR}/../system_backup_${USERNAME}.tar.gz"
 
-BACKUP_FILE="${FILE_DIR}/../system_backup_${USERNAME}.img"  # Specify the path where you want to save the backup
+echo "Starting tar recovery from $BACKUP_FILE..."
+sudo tar xzp -f $BACKUP_FILE -C $RESTORE_DESTINATION
 
-echo "Starting system recovery from $BACKUP_FILE to $DEST_DISK..."
-
-# Perform the restore using dd
-dd if=$BACKUP_FILE of=$DEST_DISK bs=64K status=progress conv=noerror,sync
-
-# Check if dd was successful
+# Check if tar was successful
 if [ $? -eq 0 ]; then
-    echo "System recovery completed successfully."
+  echo "System recovery completed successfully."
 else
-    echo "System recovery failed."
+  echo "Recovery failed."
 fi
