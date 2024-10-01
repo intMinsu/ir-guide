@@ -23,7 +23,7 @@ This documentation expects users to have such environment:<br>
 ## 🚀 Table of Contents
 |-| Name | Description | Link |
 |-|--------|-------------|---------|
-| 1 | Name 1 | Explain something | [code/test.py](code/test.py) |
-| 2 | Name 2 | Explain something | [code/test.py](code/test.py) |
-| 3 | Name 3 | Explain something | [code/test.py](code/test.py) |
-| 4 | Name 4 | Explain something | [code/test.py](code/test.py) |
+| 1 | opencv_videocapture_rtsp | Simple video capture streaming via RTSP using OpenCV and mediamtx | [code/01_mediamtx/opencv_videocapture_rtsp.py](code/01_mediamtx/opencv_videocapture_rtsp.py) |
+| 2 | simple_cuda_manipulation | Simple image manipulation with CUDA and jetson-inference package | [code/02_jetson_inference/simple_cuda_manipulation.py](code/02_jetson_inference/simple_cuda_manipulation.py) |
+| 3 | simple_videocapture_rtsp | Simple video capture streaming via RTSP with jetson-inference package | [code/02_jetson_inference/simple_videocapture_rtsp.py](code/02_jetson_inference/simple_videocapture_rtsp.py) |
+| 4 | mobilenet_rtsp | Simple MobileNet streaming via RTSP with jetson-inference package | [code/02_jetson_inference/mobilenet_rtsp.py](code/02_jetson_inference/mobilenet_rtsp.py) |
