@@ -26,4 +26,4 @@ This documentation expects users to have such environment:<br>
 | 1 | opencv_videocapture_rtsp | Simple video capture streaming via RTSP using OpenCV and mediamtx | [code](code/01_mediamtx/opencv_videocapture_rtsp.py) |
 | 2 | simple_cuda_manipulation | Simple image manipulation with CUDA and jetson-inference package | [code](code/02_jetson_inference/simple_cuda_manipulation.py) |
 | 3 | simple_videocapture_rtsp | Simple video capture streaming via RTSP with jetson-inference package | [code](code/02_jetson_inference/simple_videocapture_rtsp.py) |
-| 4 | mobilenet_rtsp | Simple MobileNet streaming via RTSP with jetson-inference package | [code](code/02_jetson_inference/mobilenet_rtsp.py) |
+| 4 | simple_mobilenet_rtsp | Simple MobileNet streaming via RTSP with jetson-inference package | [code](code/02_jetson_inference/simple_mobilenet_rtsp.py) |
