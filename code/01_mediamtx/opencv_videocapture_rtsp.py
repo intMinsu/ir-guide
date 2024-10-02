@@ -80,7 +80,7 @@ gst_writer = 'appsrc' + \
             ' ! video/x-raw, format=BGRx' +\
             ' ! nvvidconv flip-method=' + str(flip) + \
             ' ! video/x-raw(memory:NVMM), format=NV12' + \
-            ' ! nvv4l2h265enc maxperf-enable=1 bitrate=1    4000000 control-rate=1 vbv-size=450000' + \
+            ' ! nvv4l2h265enc maxperf-enable=1 bitrate=14000000 control-rate=1 vbv-size=450000' + \
             ' ! h265parse' + \
             ' ! queue' + \
             ' ! rtspclientsink location=rtsp://localhost:8554/mystream'

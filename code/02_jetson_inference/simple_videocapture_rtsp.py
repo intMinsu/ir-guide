@@ -19,13 +19,13 @@ videosource_dict = {'width': w,
                     'height': h,
                     'codec': 'mjpeg', # For logitech C920, use mjpeg
                     'encoder': 'v4l2',
-                    'save': './input.mp4', # Remove if you don't save
+                    #'save': './input.mp4', # Remove if you save
                     }
 
 videooutput_dict = {'codec': 'h265',
                     'encoder': 'v4l2',
                     'bitrate': 8000000,
-                    'save': './output.mp4', # Remove if you don't save
+                    #'save': './output.mp4', # Remove if you save
                     }
                     # H265 bitrate 720p@30fps : 4Mbps / 1080p@30fps : 8Mbps
                     # https://support.google.com/youtube/answer/2853702?hl=ko
