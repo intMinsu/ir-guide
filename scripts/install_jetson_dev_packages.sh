@@ -148,6 +148,7 @@ do_runtime() {
 
   ok "JetPack (${JETPACK_FLAVOR}) installed."
 }
+
 ######## [5] Build OpenCV (CUDA/FFmpeg/GStreamer) ########
 do_opencv() {
   local MODEL ARCH_BIN ARCH_PTX JOBS PY3_EXEC PY3_INC PY3_SITE
