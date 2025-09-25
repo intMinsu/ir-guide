@@ -40,8 +40,8 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
    ```
 3) Safely create PyTorch conda venv for project. **(Recommended!)**
    ```bash
-   bash ./safe_set_pytorch_conda.sh         # choose torch 2.1 / 2.0 / 1.14
-   bash ./safe_set_pytorch_conda.sh --no-tv # if not installing torchvision (time-saving)
+   bash ./safe_set_pytorch_conda.sh              # choose torch 2.1 / 2.0 / 1.14
+   bash ./safe_set_pytorch_conda.sh --no-tv      # if not installing torchvision (time-saving)
    ```
 4) Check whenever you are doubtful about venv is conflicted - It gives quick solution to resolve the issues
    ```bash
@@ -84,7 +84,7 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 3) 프로젝트용 PyTorch conda 환경 생성 **(권장)**  
    ```bash
    bash ./safe_set_pytorch_conda.sh              # torch 2.1 / 2.0 / 1.14 선택
-   bash ./safe_set_pytorch_conda.sh --no-tv # torchvision 미설치 (시간 절약)
+   bash ./safe_set_pytorch_conda.sh --no-tv      # torchvision 미설치 (시간 절약)
    ```
 4) 현재 conda 환경이 충돌을 일으키는지 확인하기 - 문제에 대한 빠른 해결 제공
    ```bash
