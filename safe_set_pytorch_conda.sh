@@ -232,57 +232,77 @@ python -m pip install --no-cache-dir "${TORCH_URL}"
 # ------------------------------------------------------------------------------
 # Expose system OpenCV (CUDA build) into this env (via .pth)
 # ------------------------------------------------------------------------------
-echo "[*] Exposing system OpenCV (CUDA build) to the env…"
+# ----- Bridge only selected system packages (cv2, jtop, smbus2) into this env -----
+echo "[*] Bridging system packages (cv2, jtop, smbus2) into the env…"
+
+# Env site-packages + bridge targets
 PY_SITE=$(python - <<'PY'
 import site; print(site.getsitepackages()[0])
 PY
 )
-OPENCV_PTH="${PY_SITE}/opencv_local.pth"
+BRIDGE_DIR="$CONDA_PREFIX/share/jetson-python-bridge"
+BRIDGE_PTH="${PY_SITE}/jetson_system_bridge.pth"
+mkdir -p "$BRIDGE_DIR"
 
+# Discover system locations using system python (outside conda)
 SYS_PY=$(command -v python3 || echo /usr/bin/python3)
-SYS_CV2_SITE=$($SYS_PY - <<'PY'
-import os
-from pathlib import Path
-try:
-    import cv2
-    p = Path(cv2.__file__).resolve()
-    q = p
-    while q.name not in ("site-packages","dist-packages") and q.parent != q:
-        q = q.parent
-    print(q if q.name in ("site-packages","dist-packages") else p.parent)
-except Exception:
-    print("")
+readarray -t _LOCS < <("$SYS_PY" - <<'PY'
+import importlib, pathlib
+mods = ("cv2","jtop","smbus2")
+for m in mods:
+    try:
+        mod = importlib.import_module(m)
+        p = pathlib.Path(mod.__file__).resolve()
+        print(f"{m}|{p}")
+    except Exception:
+        print(f"{m}|")  # not found
 PY
 )
 
-: > "$OPENCV_PTH"
-FOUND_CV=0
-if [[ -n "$SYS_CV2_SITE" && -d "$SYS_CV2_SITE" ]]; then
-  echo "$SYS_CV2_SITE" >> "$OPENCV_PTH"
-  echo "[+] Linked system OpenCV at: $SYS_CV2_SITE"
-  FOUND_CV=1
+: > "$BRIDGE_PTH"
+FOUND_ANY=0
+for line in "${_LOCS[@]}"; do
+  name="${line%%|*}"
+  path="${line#*|}"
+
+  if [[ -z "$path" ]]; then
+    echo "[!] System module not found: $name (skipping)"
+    continue
+  fi
+
+  case "$name" in
+    cv2)
+      # cv2 can be either a package dir (…/cv2/__init__.py) or a single .so in dist-packages
+      if [[ "$path" == */__init__.py ]]; then
+        src="$(dirname "$path")"                         # the cv2/ dir
+        ln -sfn "$src" "$BRIDGE_DIR/cv2"
+      else
+        ln -sfn "$path" "$BRIDGE_DIR/$(basename "$path")"  # the cv2*.so
+      fi
+      ;;
+    jtop|smbus2)
+      # Usually packages: link their directory
+      if [[ "$path" == */__init__.py ]]; then
+        src="$(dirname "$path")"
+      else
+        src="$(dirname "$path")"
+      fi
+      ln -sfn "$src" "$BRIDGE_DIR/$name"
+      ;;
+  esac
+
+  echo "[+] bridged $name <- $path"
+  FOUND_ANY=1
+done
+
+if [[ "$FOUND_ANY" -eq 1 ]]; then
+  echo "$BRIDGE_DIR" >> "$BRIDGE_PTH"
+  echo "[i] Bridge path written to: $BRIDGE_PTH"
 else
-  CANDIDATES=(
-    "/usr/local/lib/python3.8/dist-packages"
-    "/usr/local/lib/python3.8/site-packages"
-    "/usr/local/python"
-    "/usr/lib/python3/dist-packages"
-  )
-  for d in "${CANDIDATES[@]}"; do
-    if ls "${d}"/cv2*.so >/dev/null 2>&1 || [[ -d "${d}/cv2" ]]; then
-      echo "$d" >> "$OPENCV_PTH"
-      echo "[+] Linked candidate OpenCV at: $d"
-      FOUND_CV=1
-    fi
-  done
+  echo "[!] None of (cv2, jtop, smbus2) found in system python; no bridge created."
+  echo "[i] You can fallback to broad exposure by writing:"
+  echo "    echo \"/usr/local/lib/python3.8/dist-packages\" > \"$BRIDGE_PTH\""
 fi
-
-if [[ "$FOUND_CV" -eq 0 ]]; then
-  echo "[!] Could not auto-locate system OpenCV; edit $OPENCV_PTH to point to the directory containing 'cv2'."
-  echo "[i] Hint (outside conda): python3 -c 'import cv2, pathlib; print(pathlib.Path(cv2.__file__).resolve())'"
-fi
-
-echo "[debug] PATH=$PATH"
 
 # ------------------------------------------------------------------------------
 # Ask whether to build torchvision

@@ -22,11 +22,10 @@ This script creates a **clean conda env** that:
 2. Installs an **official Jetson PyTorch wheel** you choose (2.1.0 / 2.0.0 / 1.14.0).  
 3. **Does not** install a duplicate CUDA into conda (Torch links to **system CUDA/cuDNN/TRT**).  
 4. Optionally builds **matching torchvision** from source (with CUDA).  
-5. Keeps **OpenCV (CUDA)** from `/usr/local` visible inside the env via a `.pth` bridge.  
-6. (Default) Adds **soft clamps** on activation to keep paths sane, and uses a **hard-clamped** build shell for
-   fragile builds (you can opt out).
+5. **Selectively bridges** system Python packages into the env to avoid “flooding”: by default only **`cv2` (OpenCV, CUDA build)**, **`jtop`**, and **`smbus2`** are exposed via a tiny bridge dir.  
+6. (Default) Adds **soft clamps** on activation to keep paths sane, and uses a **hard‑clamped** build shell for fragile builds (you can opt out).
 
-Result: a stable, reproducible env with GPU working out of the box.
+Result: a stable, reproducible env with GPU working out of the box, without unintentionally importing every system package.
 
 ---
 
@@ -43,7 +42,8 @@ Result: a stable, reproducible env with GPU working out of the box.
 # 2) Follow prompts
 #   - Enter NEW conda env name
 #   - Select PyTorch version: [1] 2.1.0  [2] 2.0.0  [3] 1.14.0
-#   - The script installs the wheel, links system OpenCV, (optionally) builds torchvision, and validates CUDA.
+#   - The script installs the wheel, bridges selected system packages (cv2/jtop/smbus2),
+#     (optionally) builds torchvision, and validates CUDA.
 ```
 
 ### CLI flags / environment switches
@@ -68,21 +68,25 @@ Result: a stable, reproducible env with GPU working out of the box.
 - Creates a **new** conda env (fails fast if the name exists).  
 - Installs **Python 3.8** and Py3.8-safe build tools (`pip<25`, `setuptools<75`, `wheel<0.45`).  
 - Installs the selected **Jetson PyTorch wheel** (no `cudatoolkit`).  
-- **OpenCV (CUDA) exposure**: writes a `.pth` file in the env’s `site-packages` to include the system path
-  that contains your CUDA-built `cv2`.  
-- **(Default)** Soft clamp hooks: on `conda activate`, set/sanitize `CUDA_HOME`, `PATH`, `LD_LIBRARY_PATH` and
-  hints for CMake/pkg-config; restore on deactivate.  
+- **Selective system package bridge**: writes a `.pth` file in the env’s `site-packages` pointing to a **bridge directory** inside the env that contains **symlinks only to the desired modules** from the system install—by default `cv2`, `jtop`, and `smbus2`.  
+- **(Default)** Soft clamp hooks: on `conda activate`, set/sanitize `CUDA_HOME`, `PATH`, `LD_LIBRARY_PATH` and hints for CMake/pkg-config; restore on deactivate.  
 - **(Default)** Hard clamp for fragile builds: `env -i …` wrapper so build steps don’t inherit noisy vars.  
 - Validates with quick tests:
   - `import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.device_count())`  
   - `import cv2; print(cv2.__version__, cv2.cuda.getCudaEnabledDeviceCount())`
 
+### About the selective bridge
+- The bridge directory lives at:  
+  `"$CONDA_PREFIX/share/jetson-python-bridge"`  
+  The `.pth` file is:  
+  `"$ENV_SITE_PACKAGES/jetson_system_bridge.pth"`
+- Add/remove exposed modules by editing the bridge list in the script (default: `cv2`, `jtop`, `smbus2`).  
+- If you ever want to expose the **whole** system `dist-packages` (not recommended), you can manually write a broad path into the `.pth` file instead of the bridge path.
+
 ### About clamps (soft vs hard)
-- **Soft clamp (default):** activate/deactivate hooks keep your shell pinned to JetPack CUDA paths; reduces
-  surprises during day‑to‑day work.  
-- **Hard clamp:** only the *build command* runs in a hermetic env with whitelisted variables; ideal for
-  extension builds that are sensitive to stray env values.  
-- **No clamp:** if you pass `--no-clamp`, the script won’t install hooks and won’t use the hard-clamped wrapper.
+- **Soft clamp (default):** activate/deactivate hooks keep your shell pinned to JetPack CUDA paths; reduces surprises during day‑to‑day work.  
+- **Hard clamp:** only the *build command* runs in a hermetic env with whitelisted variables; ideal for extension builds that are sensitive to stray env values.  
+- **No clamp:** if you pass `--no-clamp`, the script won’t install hooks and won’t use the hard‑clamped wrapper.
 
 ### Why not venv?
 `venv` doesn’t manage compiled deps well on Jetson (you still must keep system CUDA in sync).  
@@ -92,8 +96,8 @@ Conda isolates Python packages while **not** replacing system CUDA.
 
 ## Troubleshooting
 
-**Build isolation pulled too-new tools on Py3.8**  
-- Symptom: setuptools “requires-python >=3.9” error; or `pip 25.x` breaks build isolation  
+**Build isolation pulled too‑new tools on Py3.8**  
+- Symptom: setuptools “requires‑python >=3.9” error; or `pip 25.x` breaks build isolation  
 - Fix inside the env:  
   ```bash
   python -m pip install "pip<25" "setuptools<75" "wheel<0.45" -U
@@ -112,9 +116,11 @@ Conda isolates Python packages while **not** replacing system CUDA.
   ```
 
 **OpenCV has no CUDA / wrong OpenCV imported**  
-- Remove any pip `opencv-*` wheels from the env; rely on system `/usr/local` build.  
-- `.pth` bridge lives in your env’s `site-packages` (e.g., `opencv_local.pth`). Make sure its line points to the
-  **directory that contains `cv2`**.
+- Ensure you didn’t install any pip `opencv-*` wheels inside the env (they can shadow the system build).  
+- Confirm the bridge path exists and contains `cv2` symlink; `.pth` should point to the bridge dir (not to `dist-packages`).
+
+**`jtop`/`smbus2` not found in the env**  
+- Make sure those packages exist in the system Python (`/usr/local/lib/python3.8/dist-packages`) and the bridge created symlinks. Adjust the bridge list or install them in the env if you prefer per‑env copies.
 
 **torchvision “CPU only” symptoms**  
 - Ensure you built it **against the active torch** and with CUDA visible (`CUDA_HOME`, `LD_LIBRARY_PATH`).  
@@ -134,10 +140,15 @@ conda env remove -n <envname>
 
 ---
 
-## Appendix: How the OpenCV `.pth` works
-Any `*.pth` placed in the env’s `site-packages/` is read by Python at startup; each non‑comment line is appended
-to `sys.path`. We write a line pointing to the **system** site/dist‑packages that contains your CUDA‑enabled `cv2`
-module, so `import cv2` from the env resolves to your `/usr/local` build.
+## Appendix: How the **selective bridge** works (.pth + symlinks)
+Any `*.pth` in `site-packages/` is read by Python at startup; each non‑comment line is appended to `sys.path`.
+Instead of pointing to the entire system `dist-packages` (which would make *all* system modules importable), this script:
+
+1) Creates a **bridge directory** inside the env (e.g., `$CONDA_PREFIX/share/jetson-python-bridge`)  
+2) Places **symlinks only for chosen modules** (default: `cv2`, `jtop`, `smbus2`) into that dir  
+3) Writes a `.pth` that points to the bridge dir
+
+Result: the env can `import cv2/jtop/smbus2` from the system install, **without** unintentionally exposing everything else.
 
 ---
 
@@ -157,8 +168,10 @@ Jetson용 **사전 빌드 PyTorch** 휠은 **이 시스템 라이브러리**를 
 2. 선택한 **Jetson PyTorch 휠** 설치(2.1.0 / 2.0.0 / 1.14.0)  
 3. conda에 **별도 CUDA 미설치** → Torch가 **시스템 CUDA/cuDNN/TRT** 사용  
 4. 필요 시 **torchvision**을 버전에 맞춰 CUDA로 빌드  
-5. `/usr/local`의 **CUDA OpenCV**를 `.pth` 브리지를 통해 환경에서 그대로 사용  
+5. **선택적 브리지**로 시스템 파이썬 패키지를 노출: 기본값으로 **`cv2`(CUDA OpenCV)**, **`jtop`**, **`smbus2`**만 환경에서 보이도록 작은 브리지 디렉터리를 사용합니다.  
 6. (기본) **Soft clamp** 훅으로 활성화 시 경로를 고정, 빌드 시엔 **Hard clamp**로 깨끗한 환경 사용
+
+결과: GPU가 바로 동작하면서도, 시스템 패키지가 **무분별하게** 환경으로 흘러들어오지 않는 재현 가능한 셋업.
 
 ---
 
@@ -175,7 +188,7 @@ Jetson용 **사전 빌드 PyTorch** 휠은 **이 시스템 라이브러리**를 
 # 2) 안내에 따라 입력
 #   - 새 conda 환경 이름
 #   - PyTorch 버전 선택: [1] 2.1.0  [2] 2.0.0  [3] 1.14.0
-#   - 휠 설치, OpenCV 연결, (선택) torchvision 빌드, CUDA 확인까지 자동 처리
+#   - 휠 설치, 선택 모듈(cv2/jtop/smbus2) 브리지, (선택) torchvision 빌드, CUDA 확인까지 자동 처리
 ```
 
 ### 옵션 (플래그/환경변수)
@@ -192,7 +205,7 @@ Jetson용 **사전 빌드 PyTorch** 휠은 **이 시스템 라이브러리**를 
 - **새 conda 환경** 생성(동일 이름 존재 시 중단)  
 - **Python 3.8** + Py3.8에 안전한 빌드 도구(`pip<25`, `setuptools<75`, `wheel<0.45`) 설치  
 - 선택한 **Jetson PyTorch 휠** 설치 (`cudatoolkit` 설치 금지)  
-- **OpenCV(CUDA)** 노출: env의 `site-packages`에 `.pth`를 작성하여 시스템 `cv2` 경로를 추가  
+- **선택적 시스템 패키지 브리지**: env 내부에 브리지 디렉터리를 만들고, 시스템 설치에서 **원하는 모듈만**(기본: `cv2`, `jtop`, `smbus2`) 심볼릭 링크로 노출. env의 `site-packages`에는 이 브리지 경로를 가리키는 `.pth`를 작성.  
 - **(기본)** Soft clamp 훅: `CUDA_HOME`, `PATH`, `LD_LIBRARY_PATH` 등을 활성화 시 고정/정리 (비활성화 시 복원)  
 - **(기본)** Hard clamp 빌드: `env -i …`로 빌드 단계만 깨끗한 환경에서 수행  
 - **간단 테스트** 수행 (torch/cv2 + CUDA 가능 여부)
@@ -218,8 +231,11 @@ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib
 ```
 
 **OpenCV에서 CUDA 미표시 / 잘못된 OpenCV 선택**  
-- env 내부의 pip `opencv-*` 휠 제거 (시스템 `/usr/local` 빌드 사용)  
-- `.pth` 파일이 **`cv2`가 위치한 디렉터리**를 가리키는지 확인
+- env 내부에 pip `opencv-*` 휠이 있으면 제거 (시스템 빌드가 가려질 수 있음)  
+- 브리지 디렉터리에 `cv2` 링크가 존재하는지, `.pth`가 브리지 경로를 가리키는지 확인
+
+**`jtop`/`smbus2` 가 env에서 안 보임**  
+- 시스템 파이썬에 해당 패키지가 설치되어 있는지 확인하고, 브리지 생성이 성공했는지 점검. 필요 시 브리지 목록을 수정하거나 env에 별도 설치.
 
 **torchvision이 CPU 전용처럼 동작**  
 - 활성 Torch에 맞춰 CUDA가 보이는 상태에서 빌드했는지 확인  
@@ -235,6 +251,18 @@ conda remove --force cudatoolkit cudnn cublas cusolver cufft cutensor pytorch-cu
 conda deactivate
 conda env remove -n <envname>
 ```
+
+---
+
+## 부록: **선택적 브리지** 동작 방식
+`site-packages/`에 있는 `*.pth` 파일은 파이썬 시작 시 읽혀 각 줄을 `sys.path`에 추가합니다.
+이 스크립트는 전체 `dist-packages`를 올리는 대신,
+
+1) env 내부에 **브리지 디렉터리**(예: `$CONDA_PREFIX/share/jetson-python-bridge`)를 만들고  
+2) 시스템 설치에서 **선택한 모듈만**(기본: `cv2`, `jtop`, `smbus2`) 심볼릭 링크로 두며  
+3) `.pth`는 이 브리지 디렉터리를 가리키게 합니다.
+
+그 결과, 필요한 모듈만 시스템 빌드로부터 보이고, 나머지는 env의 순수성/재현성을 유지합니다.
 
 ---
 
