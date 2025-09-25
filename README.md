@@ -10,7 +10,8 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 
 ### Useful docs
 - 👉 **Install dev packages safely, easily:** [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md)
-- 👉 **Safely setup conda venv for jetson:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
+- 👉 **Safely setup conda venv for jetson:** [`check_jetson_env_conflicts.md`](docs/check_jetson_env_conflicts.md)
+- 👉 **Check current conda venv is conflicted:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
 - 👉 **Code examples:** [`code/README.md`](code/README.md)
 
 ### Prerequisites
@@ -29,19 +30,23 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 1) **(Only for UOS class students!)** Wi-Fi (AX210) patch + static IPv4
    ```bash
    cd scripts
-   ./enable_ax210.sh
-   ./set_wifi_ipv4.sh                 # prompts SSID/PSK, sets static IPv4
+   bash ./enable_ax210.sh
+   bash ./set_wifi_ipv4.sh                 # prompts SSID/PSK, sets static IPv4
    ```
 ---
 2) Install jetson dev stack (see [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md) for detail)
    ```bash
-   ./install_jetson_dev_packages.sh   # default 1,2,3,4,5
+   bash ./install_jetson_dev_packages.sh   # default 1,2,3,4,5
    ```
 3) Safely create PyTorch conda venv for project. **(Recommended!)**
    ```bash
-   ./safe_set_pytorch_conda.sh        # choose torch 2.1 / 2.0 / 1.14
+   bash ./safe_set_pytorch_conda.sh         # choose torch 2.1 / 2.0 / 1.14
+   bash ./safe_set_pytorch_conda.sh --no-tv # if not installing torchvision (time-saving)
    ```
-
+4) Check whenever you are doubtful about venv is conflicted - It gives quick solution to resolve the issues
+   ```bash
+   bash ./check_jetson_env_conflicts.sh
+   ```
 ---
 
 ## 한국어
@@ -49,6 +54,7 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 ### 참고 문서
 - 👉 **개발 패키지 안전·간편 설치:** [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md)
 - 👉 **Jetson용 conda 환경 안전 설정:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
+- 👉 **현재 conda 환경의 충돌 확인:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
 - 👉 **코드 예제:** [`code/README.md`](code/README.md)
 
 ### 요구 사항
@@ -67,19 +73,23 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 1) **(서울시립대 수업 전용)** AX210 Wi‑Fi 패치 + 고정 IPv4
    ```bash
    cd scripts
-   ./enable_ax210.sh
-   ./set_wifi_ipv4.sh                 # SSID/PSK 입력받아 고정 IP 설정
+   bash ./enable_ax210.sh
+   bash ./set_wifi_ipv4.sh                 # SSID/PSK 입력받아 고정 IP 설정
    ```
 ---
 2) Jetson 개발 스택 설치 (자세한 내용: [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md))
    ```bash
-   ./install_jetson_dev_packages.sh   # 기본 1,2,3,4,5 실행
+   bash ./install_jetson_dev_packages.sh   # 기본 1,2,3,4,5 실행
    ```
 3) 프로젝트용 PyTorch conda 환경 생성 **(권장)**  
    ```bash
-   ./safe_set_pytorch_conda.sh        # torch 2.1 / 2.0 / 1.14 선택
+   bash ./safe_set_pytorch_conda.sh              # torch 2.1 / 2.0 / 1.14 선택
+   bash ./safe_set_pytorch_conda.sh --no-tv # torchvision 미설치 (시간 절약)
    ```
-
+4) 현재 conda 환경이 충돌을 일으키는지 확인하기 - 문제에 대한 빠른 해결 제공
+   ```bash
+   bash ./check_jetson_env_conflicts.sh
+   ```
 ---
 
 _Back to:_ **[Scripts](scripts/README.md)** · **[Backups](scripts/backups/README.md)** · **[Top](#intelligent-robot-guide)**
