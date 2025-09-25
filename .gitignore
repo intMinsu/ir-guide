@@ -4,3 +4,25 @@
 
 # opencv
 opencv-workspace/
+
+# zip
+.zip
+
+# Log files
+*.log
+
+# Temp and backup files
+*~
+*.tmp
+
+# IDE-specific files (Example: VS Code)
+.vscode/
+
+# Build artifacts and compiled code
+/build/
+/dist/
+/target/
+
+# Dependency directories
+**/node_modules/ # JavaScript/Node.js
+/vendor/ # PHP
