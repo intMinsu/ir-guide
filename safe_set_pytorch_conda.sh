@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
 # safe_set_pytorch_conda.sh
-# JP 5.1.5 (Python 3.8, CUDA from JetPack). Creates a conda env, installs a Jetson PyTorch wheel,
-# wires env to system CUDA + OpenCV, optionally builds matching torchvision, and verifies everything.
+# JetPack 5.1.x (Py3.8, system CUDA). Creates a conda env, installs Jetson PyTorch wheel,
+# wires env to system CUDA + OpenCV, optionally installs soft-clamp hooks (activate/deactivate),
+# optionally builds torchvision (hard-clamped unless --no-clamp), and verifies the stack.
 
 set -euo pipefail
 
-echo "=== PyTorch (Jetson) + Conda env setup ==="
+echo "=== PyTorch (Jetson) + Conda env setup (clamp-aware) ==="
 
-# ---- optional: skip torchvision via flag/env ----
-SKIP_TV="${SKIP_TV:-0}"
-if [[ "${1:-}" == "--no-tv" ]]; then
-  SKIP_TV=1
-fi
+# ------------------------------------------------------------------------------
+# Flags / env knobs
+# ------------------------------------------------------------------------------
+SKIP_TV="${SKIP_TV:-0}"             # 1 to skip torchvision build
+CLAMP_MODE="${CLAMP_MODE:-soft}"    # soft (default) | none
+if [[ "${1:-}" == "--no-tv" ]]; then SKIP_TV=1; shift; fi
+if [[ "${1:-}" == "--no-clamp" ]]; then CLAMP_MODE=none; shift; fi
 
-# ----- 0) Require Miniforge/conda -----
+# Control whether soft clamp appends old LD_LIBRARY_PATH (only when CLAMP_MODE=soft)
+JETSON_APPEND_OLD_LD_DEFAULT="${JETSON_APPEND_OLD_LD:-1}"
+
+echo "[i] CLAMP_MODE=${CLAMP_MODE}   (soft=hooks+clean build, none=no hooks, plain build)"
+echo "[i] SKIP_TV=${SKIP_TV}"
+
+# ------------------------------------------------------------------------------
+# Require Miniforge/conda
+# ------------------------------------------------------------------------------
 if [[ ! -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]]; then
   cat <<'MSG'
 Please install miniforge first.
 Example :
->> wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh
->> bash Miniforge3-Linux-aarch64.sh -b -p $HOME/miniforge3
->> source "$HOME/miniforge3/etc/profile.d/conda.sh"
->> conda activate
+  wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh
+  bash Miniforge3-Linux-aarch64.sh -b -p $HOME/miniforge3
+  source "$HOME/miniforge3/etc/profile.d/conda.sh"
+  conda activate
 MSG
   exit 1
 fi
@@ -29,20 +40,22 @@ fi
 source "$HOME/miniforge3/etc/profile.d/conda.sh" || { echo "Could not source conda.sh"; exit 1; }
 conda --version >/dev/null || { echo "conda not found in PATH even after sourcing."; exit 1; }
 
-# ----- 1) Env name -----
+# ------------------------------------------------------------------------------
+# Env name
+# ------------------------------------------------------------------------------
 read -rp "Conda env name (e.g., jp515): " ENV_NAME
-if [[ -z "${ENV_NAME}" ]]; then
-  echo "Env name is required."; exit 1
-fi
+if [[ -z "${ENV_NAME}" ]]; then echo "Env name is required."; exit 1; fi
 if conda env list | awk '{print $1}' | grep -Fxq "${ENV_NAME}"; then
   echo "Conda env '${ENV_NAME}' already exists. Choose another name."; exit 1
 fi
 
-# ----- 2) PyTorch version selection -----
+# ------------------------------------------------------------------------------
+# PyTorch version selection
+# ------------------------------------------------------------------------------
 echo "Choose PyTorch version:"
-echo "  [1] 2.1.0  (wheel: jp/v512)"
-echo "  [2] 2.0.0  (wheel: box.com link)"
-echo "  [3] 1.14.0 (wheel: jp/v51)"
+echo "  [1] 2.1.0  (wheel: jp/v512) -> torchvision 0.16.1"
+echo "  [2] 2.0.0  (wheel: box.com ) -> torchvision 0.15.1"
+echo "  [3] 1.14.0 (wheel: jp/v51  ) -> torchvision 0.14.1"
 read -rp "Enter 1/2/3: " TORCH_CHOICE
 case "${TORCH_CHOICE}" in
   1)
@@ -57,54 +70,168 @@ case "${TORCH_CHOICE}" in
     TORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v51/pytorch/torch-1.14.0a0+44dac51c.nv23.02-cp38-cp38-linux_aarch64.whl"
     TV_VERSION="0.14.1"
     ;;
-  *)
-    echo "Invalid choice."; exit 1;;
+  *) echo "Invalid choice."; exit 1;;
 esac
 
-# ----- 3) Create and activate env (Python 3.8 for Jetson wheels) -----
+# ------------------------------------------------------------------------------
+# Create and activate env (Python 3.8)
+# ------------------------------------------------------------------------------
 echo "[*] Creating conda env '${ENV_NAME}' (python=3.8)…"
 conda create -y -n "${ENV_NAME}" python=3.8 pip
 conda activate "${ENV_NAME}"
 
-# ----- 4) Make the env use system CUDA/nvcc & Jetson libs -----
-echo "[*] Wiring env to system CUDA/nvcc & Jetson libs…"
-mkdir -p "$CONDA_PREFIX/etc/conda/activate.d" "$CONDA_PREFIX/etc/conda/deactivate.d"
+# ------------------------------------------------------------------------------
+# Hard-clamp helper: with_clean_env (no-op if CLAMP_MODE=none)
+# ------------------------------------------------------------------------------
+with_clean_env() {
+  if [[ "${CLAMP_MODE}" == "none" ]]; then
+    # No hard clamp: run in current environment
+    "$@"
+  else
+    export PYTHONPATH="$(python -c 'import site; print(":".join(site.getsitepackages()))')":${PYTHONPATH:-}
+    # Hermetic command run: only whitelisted variables are kept
+    env -i \
+      HOME="$HOME" USER="$USER" SHELL="${SHELL:-/bin/bash}" TERM="${TERM:-xterm}" \
+      CONDA_PREFIX="${CONDA_PREFIX:-}" \
+      PATH="/usr/local/cuda/bin${CONDA_PREFIX:+:$CONDA_PREFIX/bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      CUDA_HOME="/usr/local/cuda" CUDA_PATH="/usr/local/cuda" \
+      LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra${CONDA_PREFIX:+:$CONDA_PREFIX/lib}" \
+      OpenCV_DIR="/usr/local/lib/cmake/opencv4" \
+      CMAKE_PREFIX_PATH="/usr/local" PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" \
+      PYTHONPATH="${PYTHONPATH:-}" \
+      PYTHONNOUSERSITE=1 \
+      "$@"
+  fi
+}
 
-cat > "$CONDA_PREFIX/etc/conda/activate.d/jetson_paths.sh" <<'EOT'
-export CUDA_HOME=/usr/local/cuda
-export PATH=/usr/local/cuda/bin:$PATH
-# Make L4T (Jetson) libs visible inside env
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}
+# ------------------------------------------------------------------------------
+# Soft clamp hooks (activate/deactivate) unless CLAMP_MODE=none
+# ------------------------------------------------------------------------------
+HOOK_ACT="$CONDA_PREFIX/etc/conda/activate.d/10-jetson_harden.sh"
+HOOK_DEACT="$CONDA_PREFIX/etc/conda/deactivate.d/10-jetson_harden.sh"
+
+if [[ "${CLAMP_MODE}" == "soft" ]]; then
+  echo "[*] Installing soft-clamp env hooks (activate/deactivate)…"
+  mkdir -p "$CONDA_PREFIX/etc/conda/activate.d" "$CONDA_PREFIX/etc/conda/deactivate.d"
+
+  # Activate hook
+  cat > "$HOOK_ACT" <<EOT
+#!/usr/bin/env bash
+# Soft clamp: prefer JetPack's CUDA + system libs when this env is active.
+
+# Save originals
+export __OLD_CUDA_HOME="\${CUDA_HOME-}"
+export __OLD_CUDA_PATH="\${CUDA_PATH-}"
+export __OLD_PATH="\$PATH"
+export __OLD_LD_LIBRARY_PATH="\${LD_LIBRARY_PATH-}"
+export __OLD_OPENBLAS_NUM_THREADS="\${OPENBLAS_NUM_THREADS-}"
+export __OLD_PYTHONNOUSERSITE="\${PYTHONNOUSERSITE-}"
+export __OLD_OpenCV_DIR="\${OpenCV_DIR-}"
+export __OLD_CMAKE_PREFIX_PATH="\${CMAKE_PREFIX_PATH-}"
+export __OLD_PKG_CONFIG_PATH="\${PKG_CONFIG_PATH-}"
+export __OLD_PYTHONPATH="\${PYTHONPATH-}"
+
+# Canonical Jetson paths
+CUDA_ROOT="/usr/local/cuda"
+JETSON_LIBS="/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra"
+ENV_LIB="\${CONDA_PREFIX}/lib"
+ENV_BIN="\${CONDA_PREFIX}/bin"
+
+# CUDA anchors
+export CUDA_HOME="\$CUDA_ROOT"
+export CUDA_PATH="\$CUDA_ROOT"
+
+# PATH: Construct a sane path order
+# Start with system essentials to prevent commands from going missing.
+SYS_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Prepend CUDA and the Conda env bin for priority.
+export PATH="\$CUDA_ROOT/bin:\$ENV_BIN:\$SYS_PATH"
+
+
+# LD_LIBRARY_PATH clamp (append prior entries controlled by JETSON_APPEND_OLD_LD)
+CLEAN_LD="\$JETSON_LIBS:\$ENV_LIB"
+if [[ "\${JETSON_APPEND_OLD_LD:-$JETSON_APPEND_OLD_LD_DEFAULT}" == "1" && -n "\${LD_LIBRARY_PATH-}" ]]; then
+  CLEAN_LD="\$CLEAN_LD:\$LD_LIBRARY_PATH"
+fi
+export LD_LIBRARY_PATH="\$CLEAN_LD"
+
+# Tool hints
+[[ -d /usr/local/lib/cmake/opencv4 ]] && export OpenCV_DIR="/usr/local/lib/cmake/opencv4"
+export CMAKE_PREFIX_PATH="/usr/local:\${CMAKE_PREFIX_PATH-}"
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:\${PKG_CONFIG_PATH-}"
+
+# Avoid user site & stray PYTHONPATH
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH 2>/dev/null || true
+
+# Threading sanity (optional)
+export OPENBLAS_NUM_THREADS=1
+
+# Speed up CUDA extension builds (auto-arch)
+MODEL="\$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "")"
+if [[ "\$MODEL" == *"Xavier"* ]]; then
+  export TORCH_CUDA_ARCH_LIST="7.2"
+elif [[ "\$MODEL" == *"Orin"* ]]; then
+  export TORCH_CUDA_ARCH_LIST="8.7"
+fi
 EOT
+  chmod +x "$HOOK_ACT"
 
-cat > "$CONDA_PREFIX/etc/conda/deactivate.d/jetson_paths.sh" <<'EOT'
-# minimal PATH cleanup on deactivate
-case ":$PATH:" in
-  *:/usr/local/cuda/bin:*) PATH="${PATH//\/usr\/local\/cuda\/bin:/}";;
-esac
-export PATH
+  # Deactivate hook
+  cat > "$HOOK_DEACT" <<'EOT'
+#!/usr/bin/env bash
+# Restore originals saved in activate hook.
+
+export CUDA_HOME="${__OLD_CUDA_HOME-}"
+export CUDA_PATH="${__OLD_CUDA_PATH-}"
+export PATH="${__OLD_PATH-}"
+export LD_LIBRARY_PATH="${__OLD_LD_LIBRARY_PATH-}"
+export OPENBLAS_NUM_THREADS="${__OLD_OPENBLAS_NUM_THREADS-}"
+export PYTHONNOUSERSITE="${__OLD_PYTHONNOUSERSITE-}"
+export OpenCV_DIR="${__OLD_OpenCV_DIR-}"
+export CMAKE_PREFIX_PATH="${__OLD_CMAKE_PREFIX_PATH-}"
+export PKG_CONFIG_PATH="${__OLD_PKG_CONFIG_PATH-}"
+export PYTHONPATH="${__OLD_PYTHONPATH-}"
+
+unset __OLD_CUDA_HOME __OLD_CUDA_PATH __OLD_PATH __OLD_LD_LIBRARY_PATH \
+      __OLD_OPENBLAS_NUM_THREADS __OLD_PYTHONNOUSERSITE __OLD_OpenCV_DIR \
+      __OLD_CMAKE_PREFIX_PATH __OLD_PKG_CONFIG_PATH __OLD_PYTHONPATH \
+      TORCH_CUDA_ARCH_LIST
 EOT
+  chmod +x "$HOOK_DEACT"
 
-# reload activation for current shell
-conda deactivate
-conda activate "${ENV_NAME}"
+  # Re-source to immediately apply soft clamp in current shell
+  conda deactivate
+  conda activate "${ENV_NAME}"
 
-# quick nvcc sanity (won't fail the whole script if absent)
+else
+  # No clamp: if hooks from a previous run exist, remove them to ensure "no clamp"
+  if [[ -f "$HOOK_ACT" || -f "$HOOK_DEACT" ]]; then
+    echo "[i] Removing existing clamp hooks to honor --no-clamp…"
+    rm -f "$HOOK_ACT" "$HOOK_DEACT" || true
+  fi
+fi
+
+# ------------------------------------------------------------------------------
+# nvcc sanity (non-fatal)
+# ------------------------------------------------------------------------------
 if ! command -v nvcc >/dev/null; then
   echo "[!] nvcc not found in PATH. Ensure JetPack CUDA is installed. Continuing…"
 else
   nvcc --version | tail -n1 || true
 fi
 
-# ----- 5) Install PyTorch wheel -----
+# ------------------------------------------------------------------------------
+# Install PyTorch wheel (Py3.8-safe toolchain)
+# ------------------------------------------------------------------------------
 echo "[*] Installing PyTorch from: ${TORCH_URL}"
-# Py3.8-safe toolchain (avoid too-new pip/setuptools/wheel)
 python -m pip install --upgrade "pip<25" "setuptools<75" "wheel<0.45"
-# numpy first keeps wheels happy on some combos
 python -m pip install "numpy<2"
 python -m pip install --no-cache-dir "${TORCH_URL}"
 
-# ----- 6) Make env see system OpenCV-CUDA -----
+# ------------------------------------------------------------------------------
+# Expose system OpenCV (CUDA build) into this env (via .pth)
+# ------------------------------------------------------------------------------
 echo "[*] Exposing system OpenCV (CUDA build) to the env…"
 PY_SITE=$(python - <<'PY'
 import site; print(site.getsitepackages()[0])
@@ -112,7 +239,6 @@ PY
 )
 OPENCV_PTH="${PY_SITE}/opencv_local.pth"
 
-# Try to discover cv2 via *system* python, then fall back to known dirs
 SYS_PY=$(command -v python3 || echo /usr/bin/python3)
 SYS_CV2_SITE=$($SYS_PY - <<'PY'
 import os
@@ -136,7 +262,6 @@ if [[ -n "$SYS_CV2_SITE" && -d "$SYS_CV2_SITE" ]]; then
   echo "[+] Linked system OpenCV at: $SYS_CV2_SITE"
   FOUND_CV=1
 else
-  # Candidate locations where cv2*.so might live (add your successful path)
   CANDIDATES=(
     "/usr/local/lib/python3.8/dist-packages"
     "/usr/local/lib/python3.8/site-packages"
@@ -157,37 +282,41 @@ if [[ "$FOUND_CV" -eq 0 ]]; then
   echo "[i] Hint (outside conda): python3 -c 'import cv2, pathlib; print(pathlib.Path(cv2.__file__).resolve())'"
 fi
 
-# ----- 6.5) Ask whether to build torchvision -----
+echo "[debug] PATH=$PATH"
+
+# ------------------------------------------------------------------------------
+# Ask whether to build torchvision
+# ------------------------------------------------------------------------------
 if [[ "$SKIP_TV" -eq 0 ]]; then
   read -rp "Build torchvision v${TV_VERSION}? [Y/n]: " _ans || true
-  if [[ "${_ans:-}" =~ ^[Nn]$ ]]; then
-    SKIP_TV=1
-  fi
+  if [[ "${_ans:-}" =~ ^[Nn]$ ]]; then SKIP_TV=1; fi
 fi
 
-# ----- 7) Build torchvision that matches the selected torch -----
+# ------------------------------------------------------------------------------
+# Build torchvision
+# ------------------------------------------------------------------------------
 if [[ "$SKIP_TV" -eq 0 ]]; then
-  echo "[*] Building torchvision v${TV_VERSION}…"
+  echo "[*] Building torchvision v${TV_VERSION} (${CLAMP_MODE} mode)…"
+
   sudo apt-get update
   sudo apt-get install -y \
-    build-essential git libjpeg-dev zlib1g-dev libpython3-dev \
-    libopenblas-dev libavcodec-dev libavformat-dev libswscale-dev
-
-  # Toolchain compatible with Python 3.8
+  build-essential git libjpeg-dev zlib1g-dev libpython3-dev \
+  libopenblas-dev libavcodec-dev libavformat-dev libswscale-dev
+  # Py3.8-safe build tooling
   python -m pip install --upgrade "pip<25" "setuptools<75" "wheel<0.45" "packaging<24.2" cmake ninja
 
-  # Pick arch list for faster build (Xavier NX = sm_72; Orin = sm_87)
+  # Device arch hint for CUDA extensions (provide anyway; harmless if CPU-only)
   MODEL=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "")
   if [[ "$MODEL" == *"Xavier"* ]]; then
     export TORCH_CUDA_ARCH_LIST="7.2"
   elif [[ "$MODEL" == *"Orin"* ]]; then
     export TORCH_CUDA_ARCH_LIST="8.7"
   else
-    export TORCH_CUDA_ARCH_LIST="7.2"   # default safe-ish
+    export TORCH_CUDA_ARCH_LIST="7.2"
   fi
 
-  # Ensure CUDA vars for the build
-  export CUDA_HOME=/usr/local/cuda
+  # Expose CUDA for the build (even in no-clamp, we politely try to help)
+  export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}
   export PATH="$CUDA_HOME/bin:$PATH"
   export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
   export FORCE_CUDA=1
@@ -198,29 +327,43 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
   git clone --branch "v${TV_VERSION}" https://github.com/pytorch/vision torchvision
   cd torchvision
 
-  # Use current env (no build isolation) to avoid too-new setuptools
-  python -m pip install --no-build-isolation -v .
+  if [[ "${CLAMP_MODE}" == "none" ]]; then
+    # Plain build in the current environment
+    python -m pip install --no-build-isolation -v .
+  else
+    # Hermetic build
+    with_clean_env python -m pip install --no-build-isolation -v .
+  fi
   popd >/dev/null
 else
   echo "[i] Skipping torchvision build (flag or user choice)."
 fi
 
-# ----- 8) Verification -----
+# ------------------------------------------------------------------------------
+# Verification
+# ------------------------------------------------------------------------------
 echo "[*] Verifying torch/torchvision/OpenCV & CUDA access…"
 python - <<'PY'
-import os, torch, cv2, subprocess
+import os, subprocess
 print("CUDA_HOME      :", os.environ.get("CUDA_HOME"))
 try:
     nv = subprocess.check_output(["nvcc","--version"]).decode().strip().splitlines()[-1]
 except Exception:
     nv = "<nvcc not found>"
 print("nvcc           :", nv)
-print("torch          :", torch.__version__, "cuda?", torch.cuda.is_available(), "devices:", torch.cuda.device_count())
+
+import torch
+print("torch          :", torch.__version__,
+      "| CUDA available:", torch.cuda.is_available(),
+      "| devices:", torch.cuda.device_count())
+
 try:
     import torchvision as tv
     print("torchvision    :", tv.__version__)
 except Exception as e:
     print("torchvision    : <not installed>", type(e).__name__)
+
+import cv2
 print("cv2            :", cv2.__version__)
 try:
     print("cv2 CUDA count :", cv2.cuda.getCudaEnabledDeviceCount())
@@ -229,4 +372,6 @@ except Exception as e:
 PY
 
 echo "=== Done. Activate with:  conda activate ${ENV_NAME}"
-echo "    Re-run with: ./safe_set_pytorch_conda.sh --no-tv   # to skip torchvision"
+echo "    Skip tv:         ./safe_set_pytorch_conda.sh --no-tv"
+echo "    No clamps:       ./safe_set_pytorch_conda.sh --no-clamp    (no hooks; plain build env)"
+echo "    Env override:    CLAMP_MODE=none SKIP_TV=1 bash safe_set_pytorch_conda.sh"
