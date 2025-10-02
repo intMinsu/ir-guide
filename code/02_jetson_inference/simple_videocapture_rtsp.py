@@ -1,95 +1,74 @@
-# Most of code is borrowed from jetson_inference repo.
-# https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-streaming.md#python
+"""
+jetson-utils zero-copy path (built-in RTSP server if 'rtsp://...'):
+- Input:  videoSource('v4l2:///dev/video0', options=...)
+- Output: videoOutput('rtsp://localhost:8554/mystream', options=...)
 
-import sys
+Note:
+  • If MediaMTX already uses :8554, stop it or change the output port here.
+---
+jetson-utils의 제로 카피(zero-copy) 경로를 사용하여 RTSP 스트림을 발행합니다.
+
+'rtsp://...' 형식의 출력을 지정하면 내장된 RTSP 서버가 활성화됩니다.
+
+- 입력: videoSource('v4l2:///dev/video0', options=...)
+- 출력: videoOutput('rtsp://localhost:8554/mystream', options=...)
+
+주의:
+    • 만약 MediaMTX가 이미 8554 포트를 사용 중이라면, 해당 서비스를 중지하거나
+      스크립트의 출력 포트를 다른 번호로 변경해야 합니다.
+
+Example code(실행 예시):
+    python simple_videocapture_rtsp.py \
+        --input v4l2:///dev/video0 \
+        --output rtsp://localhost:8554/mystream \
+        --width 1920 --height 1080 --bitrate 8000000 --codec h265
+
+"""
 import argparse
-import jetson_utils
 from jetson_utils import videoSource, videoOutput
 
-parser = argparse.ArgumentParser()
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--input",  type=str, default="v4l2:///dev/video0", help="input URI")
+    ap.add_argument("--output", type=str, default="rtsp://localhost:8554/mystream", help="output URI")
+    ap.add_argument("--width",  type=int, default=1920)
+    ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--bitrate",type=int, default=8_000_000)
+    ap.add_argument("--codec",  type=str, default="h265", choices=["h264","h265"])
+    args = ap.parse_args()
 
-# [0. Camera w/h/fps setting]
-# Please check 02_mediamtx/camera_formats.json
-w = 1920
-h = 1080
+    videosource_dict = {
+        "width": args.width,
+        "height": args.height,
+        "codec": "mjpeg",   # Logitech C920 works well with MJPEG
+        "encoder": "v4l2",
+    }
+    videooutput_dict = {
+        "codec": args.codec,
+        "encoder": "v4l2",
+        "bitrate": args.bitrate,
+    }
 
-# V4L2 cameras will be created using the camera format with the highest framerate that most closely matches the desired resolution.
-# See https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-streaming.md#command-line-arguments
-videosource_dict = {'width': w,
-                    'height': h,
-                    'codec': 'mjpeg', # For logitech C920, use mjpeg
-                    'encoder': 'v4l2',
-                    #'save': './input.mp4', # Remove if you save
-                    }
+    print(f"[videoSource] {args.input}  → {videosource_dict}")
+    print(f"[videoOutput] {args.output} → {videooutput_dict}")
 
-videooutput_dict = {'codec': 'h265',
-                    'encoder': 'v4l2',
-                    'bitrate': 8000000,
-                    #'save': './output.mp4', # Remove if you save
-                    }
-                    # H265 bitrate 720p@30fps : 4Mbps / 1080p@30fps : 8Mbps
-                    # https://support.google.com/youtube/answer/2853702?hl=ko
+    inp = videoSource(args.input, options=videosource_dict)
+    out = videoOutput(args.output, options=videooutput_dict)
 
-# [1. Input Streams]
-# https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-streaming.md#input-streams 
-parser.add_argument("--input", type=str, default="v4l2:///dev/video0", help="URI of the input stream")
+    while True:
+        img = inp.Capture(format='rgb8', timeout=1000)
+        if img is None:
+            continue
 
-# [2. Output Streams]
-# https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-streaming.md#output-streams
-parser.add_argument("--output", type=str, default="rtsp://localhost:8554/mystream", nargs='?', help="URI of the output stream")
-args = parser.parse_args()
+        # Example: overlay text (uncomment if needed)
+        # from jetson_utils import cudaFont
+        # font = cudaFont()
+        # font.OverlayText(img, 10, 10, "Jetson RTSP", 255, 255, 255, 255)
 
-# create video sources & outputs with videoSource and videoOutput
-# [3. videoSource]
-# https://github.com/dusty-nv/jetson-utils/blob/master/video/videoSource.h 
-input = videoSource(args.input, options=videosource_dict)
+        out.Render(img)
 
-# [4. videoOutput]                                    
-# https://github.com/dusty-nv/jetson-utils/blob/master/video/videoOutput.h
-output = videoOutput(args.output, options=videooutput_dict)
-                            
+        if not inp.IsStreaming() or not out.IsStreaming():
+            break
 
-# [5. Capture frames]
-# For OpenCV-based implementation, refer to https://www.youtube.com/watch?v=mB025B7KpeE
-# capture frames until end-of-stream (or the user exits)
-while True:
-    # format can be: rgb8, rgba8, rgb32f, rgba32f (rgb8 is the default)
-    # timeout can be: -1 for infinite timeout (blocking), 0 to return immediately, >0 in milliseconds (default is 1000ms)
-    imgCuda = input.Capture(format='rgb8', timeout=1000)  
-	
-    if imgCuda is None:  # if a timeout occurred
-        continue
-    
-    # [6. See imgCuda's properties]
-    # You can access properties about the image like imgCuda.width
-    # https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-image.md#image-capsules-in-python
-    # print(imgCuda) be like:
-    #     <cudaImage object>
-    #    -- ptr:      0x203cea000
-    #    -- size:     6220800
-    #    -- width:    1920
-    #    -- height:   1080
-    #    -- channels: 3
-    #    -- format:   rgb8
-    #    -- mapped:   true
-    #    -- freeOnDelete: false
-    #    -- timestamp:    6.318738
-
-    # [Example 1. cuda-to-pytorch]
-    # https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-image.md#cuda-array-interface
-    # map to torch tensor using __cuda_array_interface__
-    # tensor = torch.as_tensor(imgCuda, device='cuda')
-
-    # [Example 2. color conversion from rgb8 to rgba32f]
-    # https://github.com/dusty-nv/jetson-inference/blob/master/docs/aux-image.md#color-conversion
-    # allocate the output as rgba32f, with the same width/height as the input
-    # imgCuda_rgba32f = jetson_utils.cudaAllocMapped(width=imgCuda.width, height=imgCuda.height, format='rgba32f')
-
-    # convert from rgb8 to rgba32f (the formats used for the conversion are taken from the image capsules)
-    # jetson_utils.cudaConvertColor(imgCuda, imgCuda_rgba32f)
-    
-    output.Render(imgCuda)
-
-    # exit on input/output EOS
-    if not input.IsStreaming() or not output.IsStreaming():
-        break
+if __name__ == "__main__":
+    main()
