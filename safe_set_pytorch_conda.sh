@@ -82,6 +82,7 @@ conda activate "${ENV_NAME}"
 
 # ------------------------------------------------------------------------------
 # Hard-clamp helper: with_clean_env (no-op if CLAMP_MODE=none)
+# optional: prevent Ninja use if you really want serial distutils
 # ------------------------------------------------------------------------------
 with_clean_env() {
   if [[ "${CLAMP_MODE}" == "none" ]]; then
@@ -100,6 +101,9 @@ with_clean_env() {
       CMAKE_PREFIX_PATH="/usr/local" PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" \
       PYTHONPATH="${PYTHONPATH:-}" \
       PYTHONNOUSERSITE=1 \
+      MAX_JOBS="${MAX_JOBS:-1}" \
+      CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-1}" \
+      USE_NINJA="${USE_NINJA:-1}" \
       "$@"
   fi
 }
@@ -339,6 +343,7 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
   if [[ "${_ans:-}" =~ ^[Nn]$ ]]; then SKIP_TV=1; fi
 fi
 
+
 # ------------------------------------------------------------------------------
 # Build torchvision
 # ------------------------------------------------------------------------------
@@ -350,6 +355,11 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
   build-essential git libjpeg-dev zlib1g-dev libpython3-dev \
   libopenblas-dev libavcodec-dev libavformat-dev libswscale-dev
   # Py3.8-safe build tooling
+  # Keep memory stable on Jetsons
+  export MAX_JOBS="${MAX_JOBS:-1}"
+  export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-1}"
+  # If you still see spikes, you can disable Ninja entirely:
+  # export USE_NINJA=0
   python -m pip install --upgrade "pip<25" "setuptools<75" "wheel<0.45" "packaging<24.2" cmake ninja
 
   # Device arch hint for CUDA extensions (provide anyway; harmless if CPU-only)
