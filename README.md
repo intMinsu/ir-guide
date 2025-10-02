@@ -53,7 +53,7 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 
 ### 참고 문서
 - 👉 **개발 패키지 안전·간편 설치:** [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md)
-- 👉 **Jetson용 conda 환경 안전 설정:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
+- 👉 **Jetson용 conda 환경 안전 설정:** [`check_jetson_env_conflicts.md`](docs/check_jetson_env_conflicts.md)
 - 👉 **현재 conda 환경의 충돌 확인:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
 - 👉 **코드 예제:** [`code/README.md`](code/README.md)
 
