@@ -44,6 +44,31 @@ JOBS=4
 DS_VER=6.3
 ```
 
+### 4) `jetson_spare_mem.sh`
+Free memory fast for **builds** (e.g., torchvision) and **inference** on Jetsons.  
+- Toggle **headless** (stop/start GUI), manage **swap**, and apply **build caps** (`MAX_JOBS`, `CMAKE_BUILD_PARALLEL_LEVEL`, `USE_NINJA`).  
+- Full doc: [`jetson_spare_mem.md`](../docs/jetson_spare_mem.md)
+```bash
+# quick checks
+./jetson_spare_mem.sh status
+
+# free RAM now (temporary for this boot)
+./jetson_spare_mem.sh headless on
+
+# add 8G swap (prefer NVMe path if available)
+./jetson_spare_mem.sh swap enable 8G /swapfile
+./jetson_spare_mem.sh swap tune 10
+
+# safe build (4G profile) wrapping a command
+./jetson_spare_mem.sh wrap 4g -- pip install --no-build-isolation -v .
+
+# or export env caps to your shell
+eval "$(./jetson_spare_mem.sh caps print 8g)"
+
+# restore GUI
+./jetson_spare_mem.sh headless off
+```
+
 ---
 
 ## 한국어
@@ -83,6 +108,31 @@ JETPACK_FLAVOR=dev|runtime
 OPENCV_VER=4.10.0
 JOBS=4
 DS_VER=6.3
+```
+
+### 4) `jetson_spare_mem.sh`
+Jetson에서 **빌드/추론**용 메모리를 빠르게 확보하는 도구입니다.  
+- **헤드리스 전환**(GUI 중지/복구), **스왑 관리**, **빌드 캡 적용**(`MAX_JOBS`, `CMAKE_BUILD_PARALLEL_LEVEL`, `USE_NINJA`) 지원.  
+- 전체 문서: [`jetson_spare_mem.md`](../docs/jetson_spare_mem.md)
+```bash
+# 상태 확인
+./jetson_spare_mem.sh status
+
+# 지금 바로 메모리 확보(이번 부팅 동안)
+./jetson_spare_mem.sh headless on
+
+# 8G 스왑 추가 (가능하면 NVMe 경로 권장)
+./jetson_spare_mem.sh swap enable 8G /swapfile
+./jetson_spare_mem.sh swap tune 10
+
+# 안전한 빌드(4G 프로필)로 커맨드 래핑
+./jetson_spare_mem.sh wrap 4g -- pip install --no-build-isolation -v .
+
+# 셸에 환경변수로 적용
+eval "$(./jetson_spare_mem.sh caps print 8g)"
+
+# GUI 복구
+./jetson_spare_mem.sh headless off
 ```
 
 ---
