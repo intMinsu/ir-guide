@@ -166,5 +166,5 @@ def build_writer_caps(
         f"! {enc} maxperf-enable=1 control-rate=1 bitrate={bitrate} iframeinterval=60 "
         f"! {parse} config-interval=1 "
         f"! queue "
-        f"! rtspclientsink location={get_rtsp_url(host, port, name)} latency=0"
+        f"! rtspclientsink protocols=tcp location={get_rtsp_url(host, port, name)} latency=0"
     )

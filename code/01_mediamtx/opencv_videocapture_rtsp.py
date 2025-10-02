@@ -85,7 +85,7 @@ class NetDevMeter:
     Reads /sys/class/net/<dev>/statistics/{tx_bytes,rx_bytes} to estimate Mbps.
     Use when MediaMTX sends to remote client(s) from the same Jetson NIC.
     """
-    def __init__(self, dev: str | None):
+    def __init__(self, dev: str):
         self.dev = dev
         self.tx_path = self.rx_path = None
         self._ok = False
@@ -135,7 +135,7 @@ class NetDevMeter:
 
 # ---------- Optional OpenCV tweaks ----------
 
-def apply_opencv_tweaks(enable: bool, cap: cv2.VideoCapture | None):
+def apply_opencv_tweaks(enable: bool, cap: cv2.VideoCapture):
     """
     Lightweight hints that often reduce latency/overhead in OpenCV.
     """
@@ -160,7 +160,7 @@ def apply_opencv_tweaks(enable: bool, cap: cv2.VideoCapture | None):
 
 # ---------- Formatting helpers ----------
 
-def _fmt_bps(bps: float | None) -> str:
+def _fmt_bps(bps: float) -> str:
     if bps is None:
         return "-"
     if bps >= 1e9:
@@ -171,7 +171,7 @@ def _fmt_bps(bps: float | None) -> str:
         return f"{bps/1e3:.2f} Kbps"
     return f"{bps:.0f} bps"
 
-def _fmt_mbps(mbps: float | None) -> str:
+def _fmt_mbps(mbps: float) -> str:
     return "-" if mbps is None else f"{mbps:.2f} Mbps"
 
 # ---------- Main ----------
