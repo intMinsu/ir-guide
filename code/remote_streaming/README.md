@@ -215,4 +215,4 @@ rtsp://<JETSON_IP>:8554/mystream
 
 ---
 
-_Back to:_ **[Top-level README](../README.md)** · **[Scripts](../scripts/README.md)** · **[Docs](../docs/)**
+_Back to:_ **[Top-level README](../../README.md)** · **[Scripts](../../scripts/README.md)** · **[Docs](../../docs/)**

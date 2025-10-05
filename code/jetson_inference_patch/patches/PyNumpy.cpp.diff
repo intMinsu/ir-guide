@@ -1,0 +1,27 @@
+diff --git a/utils/python/bindings/PyNumpy.cpp b/utils/python/bindings/PyNumpy.cpp
+index 0000000..0000000 100644
+--- a/utils/python/bindings/PyNumpy.cpp
++++ b/utils/python/bindings/PyNumpy.cpp
+@@ -302,11 +302,15 @@ PyMethodDef* PyNumpy_RegisterFunctions()
+ 	return pyImageIO_Functions;
+ }
+ 
+-// Initialize NumPy
+-PyMODINIT_FUNC PyNumpy_ImportNumpy()
+-{
+-	import_array();
+-	//import_ufunc();	// only needed if using ufunctions
+-}
++// Initialize NumPy (avoid "control reaches end of non-void function" on Py3)
++// PyMODINIT_FUNC maps to a non-void return on Python 3.
++PyMODINIT_FUNC PyNumpy_ImportNumpy()
++{
++    import_array();        // returns NULL on failure in Py3
++    // import_ufunc();     // only needed if using ufuncs
++    // Return a sentinel value to satisfy compilers;
++    // callers ignore the return value.
++    return NULL;
++}
+ 
+ // Register types
+ bool PyNumpy_RegisterTypes( PyObject* module )
