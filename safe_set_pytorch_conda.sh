@@ -2,7 +2,18 @@
 # safe_set_pytorch_conda.sh
 # JetPack 5.1.x (Py3.8, system CUDA). Creates a conda env, installs Jetson PyTorch wheel,
 # wires env to system CUDA + OpenCV, optionally installs soft-clamp hooks (activate/deactivate),
-# optionally builds torchvision (hard-clamped unless --no-clamp), and verifies the stack.
+# optionally builds torchvision and torchaudio (hard-clamped unless --no-clamp), and verifies the stack.
+#
+# Enhancements:
+#  - Prints elapsed seconds for torchvision/torchaudio build steps
+#  - Uses Ninja by default (CMAKE_GENERATOR=Ninja) w/ progress via NINJA_STATUS
+#  - Interactive build-speed selector (safe/balanced/fast/custom/auto)
+#
+# Usage tips:
+#   SPEED_PROFILE=safe|balanced|fast|auto|custom:N ./safe_set_pytorch_conda.sh
+#   USE_NINJA=0 ./safe_set_pytorch_conda.sh          # force Unix Makefiles
+#   ./safe_set_pytorch_conda.sh --no-tv --no-ta      # skip building TV/TA
+#   MAX_JOBS/CMAKE_BUILD_PARALLEL_LEVEL can still override if you want.
 
 set -euo pipefail
 
@@ -12,15 +23,29 @@ echo "=== PyTorch (Jetson) + Conda env setup (clamp-aware) ==="
 # Flags / env knobs
 # ------------------------------------------------------------------------------
 SKIP_TV="${SKIP_TV:-0}"             # 1 to skip torchvision build
+SKIP_TA="${SKIP_TA:-0}"             # 1 to skip torchaudio build
 CLAMP_MODE="${CLAMP_MODE:-soft}"    # soft (default) | none
 if [[ "${1:-}" == "--no-tv" ]]; then SKIP_TV=1; shift; fi
+if [[ "${1:-}" == "--no-ta" ]]; then SKIP_TA=1; shift; fi
 if [[ "${1:-}" == "--no-clamp" ]]; then CLAMP_MODE=none; shift; fi
 
 # Control whether soft clamp appends old LD_LIBRARY_PATH (only when CLAMP_MODE=soft)
 JETSON_APPEND_OLD_LD_DEFAULT="${JETSON_APPEND_OLD_LD:-1}"
 
+# Default to Ninja unless explicitly disabled or overridden by CMAKE_GENERATOR
+USE_NINJA="${USE_NINJA:-1}"
+if [[ "${USE_NINJA}" == "1" && -z "${CMAKE_GENERATOR-}" ]]; then
+  export CMAKE_GENERATOR="Ninja"
+fi
+# Ninja progress & elapsed seconds
+if [[ "${CMAKE_GENERATOR-}" == "Ninja" ]]; then
+  export NINJA_STATUS="${NINJA_STATUS:-[%r tasks/s | %f/%t | %es elapsed]}"
+fi
+
 echo "[i] CLAMP_MODE=${CLAMP_MODE}   (soft=hooks+clean build, none=no hooks, plain build)"
 echo "[i] SKIP_TV=${SKIP_TV}"
+echo "[i] SKIP_TA=${SKIP_TA}"
+echo "[i] CMAKE_GENERATOR=${CMAKE_GENERATOR-<default>}"
 
 # ------------------------------------------------------------------------------
 # Require Miniforge/conda
@@ -41,6 +66,90 @@ source "$HOME/miniforge3/etc/profile.d/conda.sh" || { echo "Could not source con
 conda --version >/dev/null || { echo "conda not found in PATH even after sourcing."; exit 1; }
 
 # ------------------------------------------------------------------------------
+# Utilities + Build-speed selector
+# ------------------------------------------------------------------------------
+min() { [ "$1" -le "$2" ] && echo "$1" || echo "$2"; }
+detect_mem_gb() { awk '/MemTotal/{printf "%.1f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo "?"; }
+detect_cpus() { nproc --all 2>/dev/null || nproc 2>/dev/null || echo 1; }
+
+choose_build_speed() {
+  local cpus; cpus="$(detect_cpus)"
+  local mem;  mem="$(detect_mem_gb)"
+  local choice jobs tv_video=0 use_ninja="${USE_NINJA:-1}"
+
+  # SPEED_PROFILE env overrides the prompt.
+  # Accepts: safe | balanced | fast | auto | custom:<N>
+  if [[ -n "${SPEED_PROFILE:-}" ]]; then
+    case "${SPEED_PROFILE}" in
+      safe|SAFE)          jobs=2 ; tv_video=0 ;;
+      balanced|BALANCED)  jobs=4 ; tv_video=0 ;;
+      fast|FAST)
+        jobs=6
+        if [[ "$mem" != "?" ]]; then
+          mem_int=${mem%.*}
+          (( mem_int <= 8 )) && jobs=2
+        fi
+        ;;
+      auto|AUTO)
+        if [[ "$mem" != "?" ]]; then
+          mem_int=${mem%.*}
+          if   (( mem_int <= 5 ));  then jobs=2
+          elif (( mem_int <= 12 )); then jobs=4
+          else                           jobs=6
+          fi
+        else
+          jobs=2
+        fi
+        ;;
+      custom:*)
+        jobs="${SPEED_PROFILE#custom:}"
+        ;;
+      *)
+        echo "[!] Unknown SPEED_PROFILE='${SPEED_PROFILE}', falling back to prompt."
+        ;;
+    esac
+  fi
+
+  if [[ -z "${jobs:-}" ]]; then
+    echo
+    echo "== Build speed profiles =="
+    echo "  [1] Safe      (2 job)  — 4–8GB devices; minimizes OOM risk; disables tv video"
+    echo "  [2] Balanced  (4 jobs) — 8GB devices; good speed/ram balance; disables tv video"
+    echo "  [3] Fast      (6 jobs) — 16GB+ devices; faster if RAM allows"
+    echo "  [4] Custom    (set your own jobs)"
+    echo "      Detected: ${cpus} CPU cores, ~${mem} GiB RAM"
+    read -rp "Choose 1/2/3/4: " choice || choice="1"
+    case "${choice}" in
+      1) jobs=2 ; tv_video=0 ;;
+      2) jobs=4 ; tv_video=0 ;;
+      3) jobs=6 ;;
+      4)
+        read -rp "Jobs (1-${cpus}): " jobs
+        jobs="${jobs:-1}"
+        ;;
+      *) jobs=1 ; tv_video=0 ;;
+    esac
+  fi
+
+  # Clamp to CPU count
+  [[ "${jobs}" -lt 1 ]] && jobs=1
+  if [[ "${cpus}" =~ ^[0-9]+$ ]] && [[ "${jobs}" -gt "${cpus}" ]]; then jobs="${cpus}"; fi
+
+  export MAX_JOBS="${jobs}"
+  export CMAKE_BUILD_PARALLEL_LEVEL="${jobs}"
+  export USE_NINJA="${use_ninja}"
+
+  # Safe/Balanced disable torchvision video to shrink build
+  if [[ "${tv_video}" == "0" ]]; then
+    export TORCHVISION_USE_FFMPEG="${TORCHVISION_USE_FFMPEG:-0}"
+    export TORCHVISION_USE_VIDEO_CODEC="${TORCHVISION_USE_VIDEO_CODEC:-0}"
+  fi
+
+  echo "[i] Build speed: jobs=${jobs}, generator=${CMAKE_GENERATOR-<default>}, Ninja=${USE_NINJA}, tv_video_disabled=${tv_video}"
+  echo "[i] Detected resources: ${cpus} cores, ~${mem} GiB RAM"
+}
+
+# ------------------------------------------------------------------------------
 # Env name
 # ------------------------------------------------------------------------------
 read -rp "Conda env name (e.g., jp515): " ENV_NAME
@@ -53,22 +162,25 @@ fi
 # PyTorch version selection
 # ------------------------------------------------------------------------------
 echo "Choose PyTorch version:"
-echo "  [1] 2.1.0  (wheel: jp/v512) -> torchvision 0.16.1"
-echo "  [2] 2.0.0  (wheel: box.com ) -> torchvision 0.15.1"
-echo "  [3] 1.14.0 (wheel: jp/v51  ) -> torchvision 0.14.1"
+echo "  [1] 2.1.0  (wheel: jp/v512) -> torchvision 0.16.1, torchaudio 2.1.2"
+echo "  [2] 2.0.0  (wheel: box.com ) -> torchvision 0.15.1, torchaudio 2.0.2"
+echo "  [3] 1.14.0 (wheel: jp/v51  ) -> torchvision 0.14.1, torchaudio 0.13.1"
 read -rp "Enter 1/2/3: " TORCH_CHOICE
 case "${TORCH_CHOICE}" in
   1)
     TORCH_URL="https://developer.download.nvidia.cn/compute/redist/jp/v512/pytorch/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl"
     TV_VERSION="0.16.1"
+    TA_VERSION="2.1.2"
     ;;
   2)
     TORCH_URL="https://nvidia.box.com/shared/static/i8pukc49h3lhak4kkn67tg9j4goqm0m7.whl"
     TV_VERSION="0.15.1"
+    TA_VERSION="2.0.2"
     ;;
   3)
     TORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v51/pytorch/torch-1.14.0a0+44dac51c.nv23.02-cp38-cp38-linux_aarch64.whl"
     TV_VERSION="0.14.1"
+    TA_VERSION="0.13.1"
     ;;
   *) echo "Invalid choice."; exit 1;;
 esac
@@ -81,16 +193,18 @@ conda create -y -n "${ENV_NAME}" python=3.8 pip
 conda activate "${ENV_NAME}"
 
 # ------------------------------------------------------------------------------
+# Select build speed profile (sets MAX_JOBS/CMAKE_BUILD_PARALLEL_LEVEL/USE_NINJA and optional tv flags)
+# ------------------------------------------------------------------------------
+choose_build_speed
+
+# ------------------------------------------------------------------------------
 # Hard-clamp helper: with_clean_env (no-op if CLAMP_MODE=none)
-# optional: prevent Ninja use if you really want serial distutils
 # ------------------------------------------------------------------------------
 with_clean_env() {
   if [[ "${CLAMP_MODE}" == "none" ]]; then
-    # No hard clamp: run in current environment
     "$@"
   else
-    export PYTHONPATH="$(python -c 'import site; print(":".join(site.getsitepackages()))')":${PYTHONPATH:-}
-    # Hermetic command run: only whitelisted variables are kept
+    export PYTHONPATH="$(python -c 'import site; print(\":\".join(site.getsitepackages()))')":${PYTHONPATH:-}
     env -i \
       HOME="$HOME" USER="$USER" SHELL="${SHELL:-/bin/bash}" TERM="${TERM:-xterm}" \
       CONDA_PREFIX="${CONDA_PREFIX:-}" \
@@ -104,6 +218,11 @@ with_clean_env() {
       MAX_JOBS="${MAX_JOBS:-1}" \
       CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-1}" \
       USE_NINJA="${USE_NINJA:-1}" \
+      CMAKE_GENERATOR="${CMAKE_GENERATOR:-Ninja}" \
+      NINJA_STATUS="${NINJA_STATUS-}" \
+      TORCHVISION_USE_FFMPEG="${TORCHVISION_USE_FFMPEG:-0}" \
+      TORCHVISION_USE_VIDEO_CODEC="${TORCHVISION_USE_VIDEO_CODEC:-0}" \
+      CMAKE_MAKE_PROGRAM="${CMAKE_MAKE_PROGRAM-}" \
       "$@"
   fi
 }
@@ -135,43 +254,32 @@ export __OLD_CMAKE_PREFIX_PATH="\${CMAKE_PREFIX_PATH-}"
 export __OLD_PKG_CONFIG_PATH="\${PKG_CONFIG_PATH-}"
 export __OLD_PYTHONPATH="\${PYTHONPATH-}"
 
-# Canonical Jetson paths
 CUDA_ROOT="/usr/local/cuda"
 JETSON_LIBS="/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra"
 ENV_LIB="\${CONDA_PREFIX}/lib"
 ENV_BIN="\${CONDA_PREFIX}/bin"
 
-# CUDA anchors
 export CUDA_HOME="\$CUDA_ROOT"
 export CUDA_PATH="\$CUDA_ROOT"
 
-# PATH: Construct a sane path order
-# Start with system essentials to prevent commands from going missing.
 SYS_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-# Prepend CUDA and the Conda env bin for priority.
 export PATH="\$CUDA_ROOT/bin:\$ENV_BIN:\$SYS_PATH"
 
-
-# LD_LIBRARY_PATH clamp (append prior entries controlled by JETSON_APPEND_OLD_LD)
 CLEAN_LD="\$JETSON_LIBS:\$ENV_LIB"
 if [[ "\${JETSON_APPEND_OLD_LD:-$JETSON_APPEND_OLD_LD_DEFAULT}" == "1" && -n "\${LD_LIBRARY_PATH-}" ]]; then
   CLEAN_LD="\$CLEAN_LD:\$LD_LIBRARY_PATH"
 fi
 export LD_LIBRARY_PATH="\$CLEAN_LD"
 
-# Tool hints
 [[ -d /usr/local/lib/cmake/opencv4 ]] && export OpenCV_DIR="/usr/local/lib/cmake/opencv4"
 export CMAKE_PREFIX_PATH="/usr/local:\${CMAKE_PREFIX_PATH-}"
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:\${PKG_CONFIG_PATH-}"
 
-# Avoid user site & stray PYTHONPATH
 export PYTHONNOUSERSITE=1
 unset PYTHONPATH 2>/dev/null || true
 
-# Threading sanity (optional)
 export OPENBLAS_NUM_THREADS=1
 
-# Speed up CUDA extension builds (auto-arch)
 MODEL="\$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "")"
 if [[ "\$MODEL" == *"Xavier"* ]]; then
   export TORCH_CUDA_ARCH_LIST="7.2"
@@ -236,10 +344,8 @@ python -m pip install --no-cache-dir "${TORCH_URL}"
 # ------------------------------------------------------------------------------
 # Expose system OpenCV (CUDA build) into this env (via .pth)
 # ------------------------------------------------------------------------------
-# ----- Bridge only selected system packages (cv2, jtop, smbus2) into this env -----
 echo "[*] Bridging system packages (cv2, jtop, smbus2) into the env…"
 
-# Env site-packages + bridge targets
 PY_SITE=$(python - <<'PY'
 import site; print(site.getsitepackages()[0])
 PY
@@ -343,6 +449,13 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
   if [[ "${_ans:-}" =~ ^[Nn]$ ]]; then SKIP_TV=1; fi
 fi
 
+# ------------------------------------------------------------------------------
+# Ask whether to build torchaudio
+# ------------------------------------------------------------------------------
+if [[ "$SKIP_TA" -eq 0 ]]; then
+  read -rp "Build torchaudio v${TA_VERSION}? [Y/n]: " _ans || true
+  if [[ "${_ans:-}" =~ ^[Nn]$ ]]; then SKIP_TA=1; fi
+fi
 
 # ------------------------------------------------------------------------------
 # Build torchvision
@@ -352,17 +465,15 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
 
   sudo apt-get update
   sudo apt-get install -y \
-  build-essential git libjpeg-dev zlib1g-dev libpython3-dev \
-  libopenblas-dev libavcodec-dev libavformat-dev libswscale-dev
-  # Py3.8-safe build tooling
-  # Keep memory stable on Jetsons
-  export MAX_JOBS="${MAX_JOBS:-1}"
-  export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-1}"
-  # If you still see spikes, you can disable Ninja entirely:
-  # export USE_NINJA=0
+    build-essential git libjpeg-dev zlib1g-dev libpython3-dev \
+    libopenblas-dev libavcodec-dev libavformat-dev libswscale-dev
+  # Tooling
   python -m pip install --upgrade "pip<25" "setuptools<75" "wheel<0.45" "packaging<24.2" cmake ninja
 
-  # Device arch hint for CUDA extensions (provide anyway; harmless if CPU-only)
+  # Respect chosen generator
+  if [[ "${USE_NINJA}" != "1" ]]; then export CMAKE_GENERATOR="Unix Makefiles"; fi
+
+  # Device arch hint for CUDA extensions
   MODEL=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "")
   if [[ "$MODEL" == *"Xavier"* ]]; then
     export TORCH_CUDA_ARCH_LIST="7.2"
@@ -372,7 +483,7 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
     export TORCH_CUDA_ARCH_LIST="7.2"
   fi
 
-  # Expose CUDA for the build (even in no-clamp, we politely try to help)
+  # Expose CUDA for the build
   export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}
   export PATH="$CUDA_HOME/bin:$PATH"
   export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
@@ -384,22 +495,70 @@ if [[ "$SKIP_TV" -eq 0 ]]; then
   git clone --branch "v${TV_VERSION}" https://github.com/pytorch/vision torchvision
   cd torchvision
 
+  TV_T0=$(date +%s)
   if [[ "${CLAMP_MODE}" == "none" ]]; then
-    # Plain build in the current environment
     python -m pip install --no-build-isolation -v .
   else
-    # Hermetic build
     with_clean_env python -m pip install --no-build-isolation -v .
   fi
+  TV_T1=$(date +%s)
+  echo "[i] torchvision build elapsed: $((TV_T1-TV_T0))s"
+
   popd >/dev/null
 else
   echo "[i] Skipping torchvision build (flag or user choice)."
 fi
 
 # ------------------------------------------------------------------------------
+# Build torchaudio
+# ------------------------------------------------------------------------------
+if [[ "$SKIP_TA" -eq 0 ]]; then
+  echo "[*] Building torchaudio v${TA_VERSION} (${CLAMP_MODE} mode)…"
+
+  sudo apt-get update
+  sudo apt-get install -y \
+    build-essential git cmake ninja-build \
+    sox libsox-dev libsox-fmt-all \
+    libsndfile1-dev libflac-dev libvorbis-dev libopus-dev libmp3lame-dev
+
+  python -m pip install --upgrade "pip<25" "setuptools<75" "wheel<0.45" "packaging<24.2" cmake ninja
+
+  if ! command -v ninja >/dev/null 2>&1; then
+    if command -v ninja-build >/dev/null 2>&1; then
+      sudo ln -sf "$(command -v ninja-build)" /usr/local/bin/ninja
+    else
+      python -m pip install -U ninja
+    fi
+  fi
+
+  # Help CMake find it explicitly if needed
+  export CMAKE_MAKE_PROGRAM="$(command -v ninja || command -v ninja-build || true)"
+
+  if [[ "${USE_NINJA}" != "1" ]]; then export CMAKE_GENERATOR="Unix Makefiles"; fi
+
+  pushd "$HOME" >/dev/null
+  rm -rf torchaudio
+  git clone --branch "v${TA_VERSION}" https://github.com/pytorch/audio torchaudio
+  cd torchaudio
+
+  TA_T0=$(date +%s)
+  if [[ "${CLAMP_MODE}" == "none" ]]; then
+    python -m pip install --no-build-isolation -v .
+  else
+    with_clean_env python -m pip install --no-build-isolation -v .
+  fi
+  TA_T1=$(date +%s)
+  echo "[i] torchaudio build elapsed: $((TA_T1-TA_T0))s"
+
+  popd >/dev/null
+else
+  echo "[i] Skipping torchaudio build (flag or user choice)."
+fi
+
+# ------------------------------------------------------------------------------
 # Verification
 # ------------------------------------------------------------------------------
-echo "[*] Verifying torch/torchvision/OpenCV & CUDA access…"
+echo "[*] Verifying torch/torchvision/torchaudio/OpenCV & CUDA access…"
 python - <<'PY'
 import os, subprocess
 print("CUDA_HOME      :", os.environ.get("CUDA_HOME"))
@@ -420,6 +579,12 @@ try:
 except Exception as e:
     print("torchvision    : <not installed>", type(e).__name__)
 
+try:
+    import torchaudio as ta
+    print("torchaudio     :", ta.__version__)
+except Exception as e:
+    print("torchaudio     : <not installed>", type(e).__name__)
+
 import cv2
 print("cv2            :", cv2.__version__)
 try:
@@ -429,6 +594,7 @@ except Exception as e:
 PY
 
 echo "=== Done. Activate with:  conda activate ${ENV_NAME}"
-echo "    Skip tv:         ./safe_set_pytorch_conda.sh --no-tv"
+echo "    Skip tv/audio:   ./safe_set_pytorch_conda.sh --no-tv --no-ta"
 echo "    No clamps:       ./safe_set_pytorch_conda.sh --no-clamp    (no hooks; plain build env)"
-echo "    Env override:    CLAMP_MODE=none SKIP_TV=1 bash safe_set_pytorch_conda.sh"
+echo "    Speed preset:    SPEED_PROFILE=safe|balanced|fast|auto ./safe_set_pytorch_conda.sh"
+echo "    Custom jobs:     SPEED_PROFILE=custom:3 ./safe_set_pytorch_conda.sh"
