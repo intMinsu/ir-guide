@@ -56,6 +56,9 @@ checkpoints/
 # TensorRT (ONNX/UFF/TensorRT engine files)
 *.onnx
 *.engine
+*.timing
+*.timing.lock
+
 
 # pixi environments
 .pixi
