@@ -342,9 +342,10 @@ python -m pip install "numpy<2"
 python -m pip install --no-cache-dir "${TORCH_URL}"
 
 # ------------------------------------------------------------------------------
-# Expose system OpenCV (CUDA build) into this env (via .pth)
+# Expose system TensorRT & PyCUDA into this env (via .pth)
 # ------------------------------------------------------------------------------
-echo "[*] Bridging system packages (cv2, jtop, smbus2) into the env…"
+
+echo "[*] Bridging system packages (cv2, jtop, smbus2, tensorrt, pycuda) into the env…"
 
 PY_SITE=$(python - <<'PY'
 import site; print(site.getsitepackages()[0])
@@ -368,8 +369,8 @@ echo "[i] System python for probing: $SYS_PY"
 readarray -t _LOCS < <( env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "$SYS_PY" -s -E - <<'PY'
-import importlib, pathlib, sys
-mods = ("cv2","jtop","smbus2")
+import importlib, pathlib
+mods = ("cv2","jtop","smbus2","tensorrt","pycuda")
 for m in mods:
     try:
         mod = importlib.import_module(m)
@@ -380,12 +381,12 @@ for m in mods:
 PY
 )
 
-# Fallback search paths if import probe fails (JetPack 5.x = Py3.8)
+# Fallback search paths (adjust pythonX.Y if needed)
 CANDS=(
+  "/usr/lib/python3.8/dist-packages"
   "/usr/local/lib/python3.8/dist-packages"
-  "/usr/local/lib/python3/dist-packages"
   "/usr/lib/python3/dist-packages"
-  "/usr/local/python"
+  "/usr/local/lib/python3/dist-packages"
 )
 
 : > "$BRIDGE_PTH"
@@ -403,8 +404,13 @@ for line in "${_LOCS[@]}"; do
           found_so=$(ls "$base"/cv2.*.so 2>/dev/null | head -n1 || true)
           [[ -n "$found_so" ]] && origin="$found_so" && break
           ;;
-        jtop|smbus2)
+        jtop|smbus2|tensorrt|pycuda)
           if [[ -d "$base/$name" ]]; then origin="$base/$name/__init__.py"; break; fi
+          # special-case TRT: some distros place the .so next to __init__.py
+          if [[ "$name" == "tensorrt" ]]; then
+            found_trt=$(ls "$base"/tensorrt/tensorrt*.so 2>/dev/null | head -n1 || true)
+            [[ -n "$found_trt" ]] && origin="$base/tensorrt/__init__.py" && break
+          fi
           ;;
       esac
     done
@@ -424,7 +430,7 @@ for line in "${_LOCS[@]}"; do
         ln -sfn "$origin" "$BRIDGE_DIR/$(basename "$origin")"
       fi
       ;;
-    jtop|smbus2)
+    jtop|smbus2|tensorrt|pycuda)
       ln -sfn "$(dirname "$origin")" "$BRIDGE_DIR/$name"
       ;;
   esac
@@ -437,7 +443,7 @@ if [[ "$FOUND_ANY" -eq 1 ]]; then
   echo "$BRIDGE_DIR" > "$BRIDGE_PTH"
   echo "[i] Bridge path written to: $BRIDGE_PTH"
 else
-  echo "[!] None of (cv2, jtop, smbus2) found; no bridge created."
+  echo "[!] None of (cv2, jtop, smbus2, tensorrt, pycuda) found; no bridge created."
   echo "    If they’re installed under a different prefix, add that path manually to $BRIDGE_PTH"
 fi
 
