@@ -61,6 +61,7 @@ from common_utils.stagetimer import StageTimer
 from common_utils.overlay_helper import overlay_text
 from common_utils.rtsp_utils import RTSPGate, is_rtsp_uri
 from core_utils.efficientvit_helpers import download_if_missing
+from core_utils.preprocess import preprocess_cuda_rgb8_to_tensor
 
 from seg_utils.segnet_utils import (
     SegmentationBuffers,

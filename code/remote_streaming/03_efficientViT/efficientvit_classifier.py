@@ -93,10 +93,9 @@ from common_utils.overlay_helper import overlay_text
 from common_utils.stagetimer import StageTimer
 from common_utils.rtsp_utils import RTSPGate, is_rtsp_uri
 
-from core_utils.efficientvit_helpers import (
-    download_if_missing,
-    preprocess_cuda_rgb8_to_tensor,
-)
+from core_utils.efficientvit_helpers import download_if_missing
+from core_utils.preprocess import preprocess_cuda_rgb8_to_tensor
+
 from cls_utils.clsnet_utils import load_labels
 from core_utils.tensorrt_utils import export_onnx, build_trt_engine_with_trtexec
 from cls_utils.clsnet_tensorrt import TRTClassifier
