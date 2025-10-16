@@ -2,7 +2,7 @@
 
 # Scripts
 
-**Up one level:** [`../README.md`](../README.md) · **Backups:** [`backups/README.md`](backups/README.md)  
+**Up one level:** [`../README.md`](../README.md) 
 
 ---
 
@@ -137,4 +137,4 @@ eval "$(./jetson_spare_mem.sh caps print 8g)"
 
 ---
 
-_Back to:_ **[Root README](../README.md)** · **[Backups](backups/README.md)** · **[Top](#scripts)**
+_Back to:_ **Up one level:** [`../README.md`](../README.md) 

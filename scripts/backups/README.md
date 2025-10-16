@@ -63,7 +63,3 @@ chmod +x ../../scripts/backups/jetson_backup.sh
 
 > 참고: 복원은 기본적으로 `tools/backup_restore/images/`의 **가장 최신** 백업을 사용합니다.  
 > 특정 파일을 쓰려면 원하는 파일만 남기고 나머지는 임시로 이동하세요.
-
----
-
-_Back to:_ **[Scripts](../README.md)** · **[Root README](../../README.md)** · **[Top](#backups--restore-official-l4t)**
