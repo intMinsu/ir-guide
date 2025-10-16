@@ -1,6 +1,11 @@
+#!/usr/bin/env bash
+# jetson_system_bridge.sh
 # ------------------------------------------------------------------------------
-# Expose system TensorRT & PyCUDA into this env (via .pth)
+# Expose system cv2 / jtop / smbus2 / tensorrt / pycuda into this env (via .pth)
+# and prioritize them over pip wheels by ensuring the bridge path is at sys.path[0].
 # ------------------------------------------------------------------------------
+
+set -euo pipefail
 
 echo "[*] Bridging system packages (cv2, jtop, smbus2, tensorrt, pycuda) into the env…"
 
@@ -9,7 +14,7 @@ import site; print(site.getsitepackages()[0])
 PY
 )
 BRIDGE_DIR="$CONDA_PREFIX/share/jetson-python-bridge"
-BRIDGE_PTH="${PY_SITE}/jetson_system_bridge.pth"
+PTH_FILE="${PY_SITE}/jetson_system_bridge.pth"
 mkdir -p "$BRIDGE_DIR"
 
 # Prefer real system python (not the conda one)
@@ -46,7 +51,6 @@ CANDS=(
   "/usr/local/lib/python3/dist-packages"
 )
 
-: > "$BRIDGE_PTH"
 FOUND_ANY=0
 for line in "${_LOCS[@]}"; do
   name="${line%%|*}"
@@ -63,7 +67,6 @@ for line in "${_LOCS[@]}"; do
           ;;
         jtop|smbus2|tensorrt|pycuda)
           if [[ -d "$base/$name" ]]; then origin="$base/$name/__init__.py"; break; fi
-          # special-case TRT: some distros place the .so next to __init__.py
           if [[ "$name" == "tensorrt" ]]; then
             found_trt=$(ls "$base"/tensorrt/tensorrt*.so 2>/dev/null | head -n1 || true)
             [[ -n "$found_trt" ]] && origin="$base/tensorrt/__init__.py" && break
@@ -78,17 +81,19 @@ for line in "${_LOCS[@]}"; do
     continue
   fi
 
-  # Create symlinks into the bridge
+  mkdir -p "$BRIDGE_DIR"
+
+  # Create symlinks into the bridge (use realpaths so cv2.__file__ realpath is truthful)
   case "$name" in
     cv2)
       if [[ "$origin" == */__init__.py ]]; then
-        ln -sfn "$(dirname "$origin")" "$BRIDGE_DIR/cv2"
+        ln -sfn "$(realpath -m "$(dirname "$origin")")" "$BRIDGE_DIR/cv2"
       else
-        ln -sfn "$origin" "$BRIDGE_DIR/$(basename "$origin")"
+        ln -sfn "$(realpath -m "$origin")" "$BRIDGE_DIR/$(basename "$origin")"
       fi
       ;;
     jtop|smbus2|tensorrt|pycuda)
-      ln -sfn "$(dirname "$origin")" "$BRIDGE_DIR/$name"
+      ln -sfn "$(realpath -m "$(dirname "$origin")")" "$BRIDGE_DIR/$name"
       ;;
   esac
 
@@ -97,9 +102,30 @@ for line in "${_LOCS[@]}"; do
 done
 
 if [[ "$FOUND_ANY" -eq 1 ]]; then
-  echo "$BRIDGE_DIR" > "$BRIDGE_PTH"
-  echo "[i] Bridge path written to: $BRIDGE_PTH"
+  # Write a .pth with:
+  #  1) a literal path line (appends to sys.path)
+  #  2) a single executed line that moves it to the front (must be one line)
+  cat > "$PTH_FILE" <<EOF
+$BRIDGE_DIR
+import sys; p=r"$BRIDGE_DIR"; sys.path.insert(0, sys.path.pop(sys.path.index(p))) if p in sys.path else sys.path.insert(0,p)
+EOF
+  echo "[i] Bridge path written to: $PTH_FILE"
+
+  # Quick sanity check
+  python - <<'PY' || true
+import os, sys, importlib
+print("[i] sys.path[0]       :", sys.path[0])
+try:
+    import cv2
+    print("[i] cv2 path (real)   :", os.path.realpath(getattr(cv2, "__file__", "")))
+    info = cv2.getBuildInformation() if hasattr(cv2, "getBuildInformation") else ""
+    has_cuda = ("CUDA: YES" in info) or bool(getattr(cv2, "cuda", None))
+    print("[i] cv2 CUDA          :", "YES" if has_cuda else "NO")
+except Exception as e:
+    print("[!] cv2 import failed :", e)
+PY
+
 else
   echo "[!] None of (cv2, jtop, smbus2, tensorrt, pycuda) found; no bridge created."
-  echo "    If they’re installed under a different prefix, add that path manually to $BRIDGE_PTH"
+  echo "    If they’re installed under a different prefix, add that path manually to $PTH_FILE"
 fi
