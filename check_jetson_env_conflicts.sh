@@ -20,7 +20,7 @@ print("[i] Python      :", ".".join(map(str, sys.version_info[:3])))
 PY
 
   # 1) Accidental CUDA/CUDNN pulled into conda (JetPack should supply CUDA)
-  if command -v conda >/dev/null 2>&1; then
+  if command -v conda >/dev/null 2>&1 || [[ -n "${CONDA_EXE:-}" ]]; then
     if conda list 2>/dev/null | grep -Eiq '(^|\s)(cuda(|toolkit)|cudnn|cublas|cusolver|cufft|cutensor|pytorch-cuda)(\s|=)'; then
       echo "[!] Found CUDA/cuDNN-like packages in this conda env (conflicts with JetPack)."
       echo "    -> Fix: conda remove -n ${CONDA_DEFAULT_ENV:-<env>} --force cudnn cudatoolkit cublas cusolver cufft cutensor pytorch-cuda"
@@ -33,20 +33,45 @@ PY
   fi
 
   # 2) Accidental pip OpenCV wheels (override your CUDA OpenCV)
-  if python -m pip list --format=columns 2>/dev/null | grep -Eiq '^opencv-(python|python-headless|contrib-python)\s'; then
-    echo "[!] Found pip OpenCV wheels that can override your /usr/local CUDA build."
-    echo "    -> Fix: pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python"
-    ((ERR++))
-  else
-    echo "[OK] No pip OpenCV wheels detected."
-  fi
+  python - <<'PY'
+# robust: don’t rely on pip list output; inspect installed dists
+try:
+    try:
+        from importlib import metadata as md
+    except Exception:
+        import importlib_metadata as md
+    names = { (d.metadata.get('Name','') or '').lower() for d in md.distributions() }
+    bad = [n for n in ('opencv-python','opencv-python-headless','opencv-contrib-python') if n in names]
+    if bad:
+        print("[!] Found pip OpenCV wheels:", ", ".join(bad))
+        print("    -> Fix: pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python")
+        raise SystemExit(1)
+    else:
+        print("[OK] No pip OpenCV wheels detected.")
+except Exception as e:
+    # if metadata query fails, fallback to pip list grep as best-effort
+    import subprocess, shlex, sys
+    try:
+        out = subprocess.check_output(shlex.split(sys.executable + " -m pip list --format=columns"), stderr=subprocess.DEVNULL, text=True)
+        import re
+        if re.search(r'^opencv-(python|python-headless|contrib-python)\s', out, re.IGNORECASE|re.MULTILINE):
+            print("[!] Found pip OpenCV wheels (fallback detection).")
+            print("    -> Fix: pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python")
+            raise SystemExit(1)
+        else:
+            print("[OK] No pip OpenCV wheels detected. (fallback)")
+    except Exception:
+        print("[i] Could not query pip packages for OpenCV wheels.")
+        # don’t fail here
+PY
+  [[ $? -ne 0 ]] && ((ERR++))
 
   # 3) Where does cv2 come from? Is it CUDA-enabled?
   python - <<'PY'
 import sys
 try:
-    import cv2
-    src = cv2.__file__
+    import cv2, os
+    src = os.path.realpath(getattr(cv2, "__file__", ""))
     info = cv2.getBuildInformation() if hasattr(cv2, "getBuildInformation") else ""
     has_cuda = ("CUDA: YES" in info) or bool(getattr(cv2, "cuda", None))
     devs = cv2.cuda.getCudaEnabledDeviceCount() if getattr(cv2, "cuda", None) else -1
@@ -54,15 +79,15 @@ try:
     print(f"[OK] cv2 CUDA     : {'YES' if has_cuda else 'NO'}")
     print(f"[OK] cv2 CUDA devs: {devs}")
     if not has_cuda:
-        print("[!] Suggestion   : Non-CUDA OpenCV in use. Ensure your env has a .pth pointing to the /usr/local .../site-packages that contains CUDA-built cv2, and remove pip wheels that shadow it.")
+        print("[!] Suggestion   : Non-CUDA OpenCV in use. Ensure your env bridges to the system cv2 (JetPack) and remove pip wheels that shadow it.")
 except Exception as e:
     print(f"[!] cv2 import failed: {e}")
-    print("    -> Fix: verify your /usr/local OpenCV install and add a .pth in this env that points to its site-packages (e.g., opencv_local.pth).")
+    print("    -> Fix: run jetson_system_bridge.sh to inject system cv2, and remove any pip OpenCV wheels.")
     sys.exit(1)
 PY
   [[ $? -ne 0 ]] && ((ERR++))
 
-  # 4) Torch/Torchvision compatibility (mapping-based) + CUDA availability
+  # 4) Torch/Torchvision compatibility + CUDA availability
   python - <<'PY'
 import sys
 from packaging.version import Version
@@ -166,7 +191,6 @@ PY
   return $ERR
 }
 
-# If executed (not sourced), run the checker
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   check_jetson_env_conflicts
   exit $?
