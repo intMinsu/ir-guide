@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# code/remote_streaming/03_efficientViT/patches/add_future_annotations.py
 """
 Add: from __future__ import annotations  to every *.py under efficientvit (for Python 3.8 compat).
 
