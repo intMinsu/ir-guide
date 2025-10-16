@@ -1,6 +1,7 @@
-# `jetson_spare_mem.sh` — Free RAM Quickly for Builds & Inference
 [ [English](#english) | [한국어](#한국어) ]
-
+# `jetson_spare_mem.sh` — Free RAM Quickly for Builds & Inference
+**Up one level:** [`../README.md`](../README.md)
+> Location: `ir-guide/scripts/jetson_spare_mem.sh`
 ---
 
 ## English
@@ -283,7 +284,3 @@ dmesg | egrep -i 'killed process|out of memory' | tail -n5
 # 부팅 기본값을 GUI로 복원
 ./jetson_spare_mem.sh headless persist-off
 ```
-
----
-
-_Back to:_ **[Scripts](../scripts/README.md)** · **[Top](#jetson_spare_memsh-—-free-ram-quickly-for-builds--inference)**

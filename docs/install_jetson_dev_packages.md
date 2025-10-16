@@ -1,8 +1,8 @@
 [ [English](#english) | [한국어](#한국어) ]
 
 # Jetson Dev Stack Installer — `install_jetson_dev_packages.sh`
-
-> Location: `./scripts/install_jetson_dev_packages.sh`
+**Up one level:** [`../README.md`](../README.md)
+> Location: `ir-guide/scripts/install_jetson_dev_packages.sh`
 
 ---
 
@@ -191,7 +191,3 @@ jtop --version || echo "sudo -E jtop 로 실행하세요"
 - JetPack 메타: `sudo apt remove --purge 'nvidia-jetpack*'` (활성 시스템에서는 비권장)  
 - OpenCV(소스 설치): `/usr/local`의 관련 파일 수동 삭제(주의)  
 - DeepStream: `sudo apt remove --purge 'deepstream*'`
-
----
-
-_Back to:_ **[Root README](../README.md)** · **[Scripts](../scripts/README.md)** · **[PyTorch env](./safe_set_pytorch_conda.md)** 
