@@ -12,6 +12,7 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 - 👉 **Install dev packages safely, easily:** [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md)
 - 👉 **Safely setup conda venv for jetson:** [`check_jetson_env_conflicts.md`](docs/check_jetson_env_conflicts.md)
 - 👉 **Check current conda venv is conflicted:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
+- 👉 **Safely link system packages on conda venv :** [`jetson_system_bridge.md`](docs/jetson_system_bridge.md)
 - 👉 **Code examples:** [`code/README.md`](code/README.md)
 
 ### Prerequisites
@@ -47,6 +48,10 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
    ```bash
    bash ./check_jetson_env_conflicts.sh
    ```
+5) Link system packages on current conda venv again just in the case you accidentally installed opencv-python.
+   ```bash
+   bash ./jetson_system_bridge.sh
+   ```
 ---
 
 ## 한국어
@@ -55,6 +60,7 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
 - 👉 **개발 패키지 안전·간편 설치:** [`install_jetson_dev_packages.md`](docs/install_jetson_dev_packages.md)
 - 👉 **Jetson용 conda 환경 안전 설정:** [`check_jetson_env_conflicts.md`](docs/check_jetson_env_conflicts.md)
 - 👉 **현재 conda 환경의 충돌 확인:** [`safe_set_pytorch_conda.md`](docs/safe_set_pytorch_conda.md)
+- 👉 **Jetson용 conda에 시스템 패키지를 링크:** [`jetson_system_bridge.md`](docs/jetson_system_bridge.md)
 - 👉 **코드 예제:** [`code/README.md`](code/README.md)
 
 ### 요구 사항
@@ -90,6 +96,8 @@ Author: Minsu Kwon (M.S in Dept of AI, University of Seoul)
    ```bash
    bash ./check_jetson_env_conflicts.sh
    ```
+5) 실수로 opencv-python 등을 설치했을 때, 현재 conda 환경에 시스템 패키지를 다시 링크하기  
+   ```bash
+   bash ./jetson_system_bridge.sh
+   ```
 ---
-
-_Back to:_ **[Scripts](scripts/README.md)** · **[Backups](scripts/backups/README.md)** · **[Top](#intelligent-robot-guide)**

@@ -1,5 +1,6 @@
-# jetson_inference_patch
 [ [English](#english) | [한국어](#한국어) ]
+# jetson_inference_patch
+**Up one level:** [`../README.md`](../README.md) 
 
 This folder contains a small set of patches and helper scripts that make **NVIDIA jetson-inference** build & install cleanly **inside a Conda environment** on Jetson (JetPack 5.x / Python 3.8). It keeps all build artifacts isolated under your active Conda env and avoids polluting system paths like `/usr/lib` or `/usr/lib/python3.x/dist-packages`.
 
